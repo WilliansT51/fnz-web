@@ -1,59 +1,88 @@
-# ProyectoFNZ
+# FNZ · Cliente del Módulo de Seguridad
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.1.7.
+Interfaz web del módulo de seguridad del sistema FNZ. Consume la API **fnz-api**
+(repo aparte).
 
-## Development server
+- **Angular 21** (standalone, signals, control flow)
+- **PrimeNG 21** (última versión con licencia MIT) + tema Aura
+- Chart.js para las gráficas del dashboard
+- SSR configurado en modo *client render* (SPA autenticada)
 
-To start a local development server, run:
+## Requisitos
 
-```bash
-ng serve
-```
+- Node.js **20+** y npm 10+
+- La API **fnz-api** corriendo (por defecto en `http://127.0.0.1:8000`)
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
-
-## Code scaffolding
-
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
-
-```bash
-ng generate component component-name
-```
-
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+## Instalación
 
 ```bash
-ng generate --help
+git clone https://github.com/TU-USUARIO/fnz-web.git
+cd fnz-web
+npm install
 ```
 
-## Building
+## Configuración
 
-To build the project run:
+La URL de la API se define en `src/environments/`:
+
+| Archivo | Uso |
+|---|---|
+| `environment.development.ts` | `ng serve` → `http://127.0.0.1:8000/api` |
+| `environment.ts` | build de producción → `/api` (mismo origen tras un proxy) |
+
+Para producción, ajusta `apiUrl` en `environment.ts` o sirve el frontend detrás
+del mismo dominio que la API.
+
+## Ejecución (desarrollo)
 
 ```bash
-ng build
+npm start          # equivale a: ng serve
 ```
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+Abre `http://localhost:4200/`. Recarga en caliente al guardar.
 
-## Running unit tests
+> Asegúrate de tener la API encendida; si no, el login muestra
+> *"No hay conexión con el servidor"*.
 
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
+## Build de producción
 
 ```bash
-ng test
+npm run build      # genera dist/ProyectoFNZ/
 ```
 
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
+## Pruebas
 
 ```bash
-ng e2e
+npm test           # Vitest
 ```
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+## Estructura
 
-## Additional Resources
+```
+src/app/
+  core/
+    auth/          auth.service (signals), token-storage (SSR-safe),
+                   token.interceptor (refresh transparente), error.interceptor,
+                   auth.guards, menu.service, tiene-permiso.directive
+    models/        Interfaces de la API
+  features/
+    auth/          login, cambiar-password, olvide-password, restablecer-password
+    layout/        shell (menú lateral dinámico), sin-permiso
+    seguridad/
+      usuarios/    Listado + alta/edición
+      roles/       Roles + matriz de permisos
+      sesiones/    Sesiones activas (polling)
+      auditoria/   Bitácora + filtros + export
+      dashboard/   Métricas + gráficas + tiempo real
+      mi-seguridad/ Enrolamiento 2FA (TOTP con QR)
+  app.routes.ts    Rutas con guards (authGuard, permisoGuard, …)
+  app.config.ts    HttpClient + interceptores + PrimeNG
+```
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+## Notas
+
+- La autorización es de doble capa: el `permisoGuard` y la directiva
+  `*appTienePermiso` ocultan/deshabilitan en el cliente, pero **la decisión real
+  la toma la API** (`middleware permiso:*`).
+- Los tokens se guardan en `localStorage`; el interceptor renueva el *access
+  token* automáticamente ante un `401`.
