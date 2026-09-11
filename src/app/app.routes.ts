@@ -104,6 +104,46 @@ export const routes: Routes = [
         title: 'Mi seguridad · FNZ',
       },
       {
+        path: 'catalogos/ubicacion',
+        canActivate: [permisoGuard],
+        data: { permisos: ['ubicacion.consultar'] },
+        loadComponent: () =>
+          import('./features/ofrendas/ubicacion/ubicacion.component').then(
+            (m) => m.UbicacionComponent,
+          ),
+        title: 'Ubicación · FNZ',
+      },
+      {
+        path: 'catalogos/eclesiastico',
+        canActivate: [permisoGuard],
+        data: { permisos: ['eclesiastico.consultar'] },
+        loadComponent: () =>
+          import('./features/ofrendas/eclesiastico/eclesiastico.component').then(
+            (m) => m.EclesiasticoComponent,
+          ),
+        title: 'Estructura eclesiástica · FNZ',
+      },
+      {
+        path: 'catalogos/financiero',
+        canActivate: [permisoGuard],
+        data: { permisos: ['financiero.consultar'] },
+        loadComponent: () =>
+          import('./features/ofrendas/financiero/financiero.component').then(
+            (m) => m.FinancieroComponent,
+          ),
+        title: 'Catálogos financieros · FNZ',
+      },
+      {
+        path: 'ofrendas/solicitudes',
+        canActivate: [permisoGuard],
+        data: { permisos: ['solicitudes.consultar'] },
+        loadComponent: () =>
+          import('./features/ofrendas/solicitudes/solicitudes.component').then(
+            (m) => m.SolicitudesComponent,
+          ),
+        title: 'Solicitudes de cambio · FNZ',
+      },
+      {
         path: 'sin-permiso',
         loadComponent: () =>
           import('./features/layout/sin-permiso.component').then(
