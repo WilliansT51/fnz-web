@@ -142,6 +142,16 @@ import { CampoFormulario, ColumnaTabla, OpcionSelect } from '../../../core/model
               @case ('numero') {
                 <p-inputNumber [formControl]="control(campo.nombre)" fluid />
               }
+              @case ('digitos') {
+                <input
+                  pInputText
+                  [formControl]="control(campo.nombre)"
+                  inputmode="numeric"
+                  [maxlength]="campo.longitudMaxima ?? campo.longitud ?? 30"
+                  (input)="filtrarSoloDigitos($event, campo.nombre)"
+                  fluid
+                />
+              }
               @case ('textarea') {
                 <textarea pTextarea [formControl]="control(campo.nombre)" rows="3" fluid></textarea>
               }
@@ -303,6 +313,15 @@ export class CatalogoTablaComponent<T extends { id: number } = { id: number }> i
     return this.form.get(nombre) as import('@angular/forms').FormControl;
   }
 
+  /** Descarta cualquier caracter no numérico a medida que se escribe (campos tipo 'digitos'). */
+  filtrarSoloDigitos(evento: Event, nombreCampo: string): void {
+    const valor = (evento.target as HTMLInputElement).value;
+    const limpio = valor.replace(/\D/g, '');
+    if (limpio !== valor) {
+      this.control(nombreCampo).setValue(limpio);
+    }
+  }
+
   valorColumna(registro: Record<string, unknown>, columna: ColumnaTabla): string {
     if (columna.tipo === 'relacion' && columna.relacion) {
       const objeto = registro[columna.relacion.objeto] as Record<string, unknown> | null;
@@ -350,6 +369,9 @@ export class CatalogoTablaComponent<T extends { id: number } = { id: number }> i
     for (const campo of this.campos()) {
       const control = this.control(campo.nombre);
       const validadores = campo.requerido ? [Validators.required] : [];
+      if (campo.tipo === 'digitos' && campo.longitud) {
+        validadores.push(Validators.pattern(new RegExp(`^\\d{${campo.longitud}}$`)));
+      }
       control.setValidators(validadores);
       control.updateValueAndValidity();
 

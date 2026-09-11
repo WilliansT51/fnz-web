@@ -70,13 +70,21 @@ export class EclesiasticoComponent {
     { nombre: 'nombre', etiqueta: 'Nombre', tipo: 'texto', requerido: true },
     { nombre: 'apellido', etiqueta: 'Apellido', tipo: 'texto', requerido: true },
     {
+      nombre: 'cui',
+      etiqueta: 'CUI',
+      tipo: 'digitos',
+      longitud: 13,
+      ayuda: 'Código Único de Identificación, 13 dígitos.',
+    },
+    {
       nombre: 'grado_ministerial_id',
       etiqueta: 'Grado ministerial',
       tipo: 'select',
       opcionesEndpoint: 'catalogos/eclesiastico/grados',
     },
-    { nombre: 'telefono', etiqueta: 'Teléfono', tipo: 'texto' },
-    { nombre: 'celular', etiqueta: 'Celular', tipo: 'texto' },
+    { nombre: 'telefono', etiqueta: 'Teléfono', tipo: 'digitos', longitudMaxima: 30 },
+    { nombre: 'celular', etiqueta: 'Celular', tipo: 'digitos', longitudMaxima: 30 },
+    { nombre: 'numero_dependientes', etiqueta: 'Número de dependientes', tipo: 'numero' },
     {
       nombre: 'estado',
       etiqueta: 'Estado',
@@ -91,6 +99,7 @@ export class EclesiasticoComponent {
   readonly columnasMinistro: ColumnaTabla[] = [
     { campo: 'nombre', etiqueta: 'Nombre' },
     { campo: 'apellido', etiqueta: 'Apellido' },
+    { campo: 'cui', etiqueta: 'CUI' },
     { campo: 'estado', etiqueta: 'Estado' },
   ];
 }

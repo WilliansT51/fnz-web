@@ -2,8 +2,13 @@ import { Paginado } from './seguridad.models';
 
 export type { Paginado };
 
-/** Tipos de campo soportados por el formulario dinámico de un catálogo genérico. */
-export type TipoCampo = 'texto' | 'numero' | 'select' | 'checkbox' | 'fecha' | 'textarea';
+/**
+ * Tipos de campo soportados por el formulario dinámico de un catálogo
+ * genérico. 'digitos' es un texto restringido a solo números mientras se
+ * escribe (preserva ceros a la izquierda, a diferencia de 'numero'); útil
+ * para teléfono, celular o CUI.
+ */
+export type TipoCampo = 'texto' | 'numero' | 'digitos' | 'select' | 'checkbox' | 'fecha' | 'textarea';
 
 /** Una opción estática de un `<p-select>` (p. ej. un enum fijo). */
 export interface OpcionSelect {
@@ -29,6 +34,10 @@ export interface CampoFormulario {
   ocultarEnAlta?: boolean;
   ancho?: 'completo' | 'medio';
   ayuda?: string;
+  /** Solo para tipo 'digitos': longitud EXACTA exigida (p. ej. 13 para un CUI). Sin esto, solo se restringe a dígitos. */
+  longitud?: number;
+  /** Solo para tipo 'digitos': tope de caracteres mientras se escribe (por defecto, `longitud` o 30). */
+  longitudMaxima?: number;
 }
 
 /** Describe una columna de la tabla de un catálogo genérico. */
@@ -91,8 +100,10 @@ export interface Ministro {
   grado_ministerial_id: number | null;
   nombre: string;
   apellido: string;
+  cui: string | null;
   telefono: string | null;
   celular: string | null;
+  numero_dependientes: number | null;
   estado: 'activo' | 'inactivo';
 }
 
