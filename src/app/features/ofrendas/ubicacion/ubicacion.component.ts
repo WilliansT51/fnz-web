@@ -139,13 +139,6 @@ export class UbicacionComponent {
   ];
 
   readonly camposDepartamento: CampoFormulario[] = [
-    {
-      nombre: 'distrito_id',
-      etiqueta: 'Distrito',
-      tipo: 'select',
-      requerido: true,
-      opcionesEndpoint: 'catalogos/ubicacion/distritos',
-    },
     { nombre: 'nombre', etiqueta: 'Nombre', tipo: 'texto', requerido: true },
     CAMPOS_ESTADO,
   ];

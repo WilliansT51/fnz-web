@@ -162,7 +162,7 @@ import {
               optionLabel="label"
               optionValue="value"
               [ngModel]="distritoSeleccionado()"
-              (ngModelChange)="cambiarDistrito($event)"
+              (ngModelChange)="distritoSeleccionado.set($event)"
               [ngModelOptions]="{ standalone: true }"
               fluid
             />
@@ -173,10 +173,10 @@ import {
               [options]="opcionesDepartamento()"
               optionLabel="label"
               optionValue="value"
+              [filter]="true"
               [ngModel]="departamentoSeleccionado()"
               (ngModelChange)="cambiarDepartamento($event)"
               [ngModelOptions]="{ standalone: true }"
-              [disabled]="!distritoSeleccionado()"
               fluid
             />
           </label>
@@ -187,6 +187,7 @@ import {
               [options]="opcionesMunicipio()"
               optionLabel="label"
               optionValue="value"
+              [filter]="true"
               [disabled]="!departamentoSeleccionado()"
               fluid
             />
@@ -331,6 +332,8 @@ export class IglesiasComponent implements OnInit {
   readonly opcionesMinistro = signal<OpcionSelect[]>([]);
   readonly distritoSeleccionado = signal<number | null>(null);
   readonly departamentoSeleccionado = signal<number | null>(null);
+  /** Todos los municipios (catálogo nacional), cargados una vez; se filtran client-side por departamento. */
+  private todosMunicipios: Municipio[] = [];
 
   readonly dialogoMinistro = signal(false);
   readonly iglesiaActiva = signal<Iglesia | null>(null);
@@ -358,6 +361,15 @@ export class IglesiasComponent implements OnInit {
     this.api.todos<Distrito>('catalogos/ubicacion/distritos').subscribe((r) => {
       this.opcionesDistrito.set(r.data.map((d) => ({ label: d.nombre, value: d.id })));
     });
+    // Departamento y Municipio son catálogos nacionales planos: se cargan
+    // una sola vez, sin depender del distrito seleccionado. Los municipios
+    // se filtran client-side por departamento (ver `cambiarDepartamento`).
+    this.api.todos<Departamento>('catalogos/ubicacion/departamentos').subscribe((r) => {
+      this.opcionesDepartamento.set(r.data.map((d) => ({ label: d.nombre, value: d.id })));
+    });
+    this.api.todos<Municipio>('catalogos/ubicacion/municipios').subscribe((r) => {
+      this.todosMunicipios = r.data;
+    });
     this.cargarOpcionesMinistro();
   }
 
@@ -368,26 +380,18 @@ export class IglesiasComponent implements OnInit {
     });
   }
 
-  cambiarDistrito(distritoId: number | null): void {
-    this.distritoSeleccionado.set(distritoId);
-    this.departamentoSeleccionado.set(null);
-    this.opcionesDepartamento.set([]);
-    this.opcionesMunicipio.set([]);
-    this.form.patchValue({ municipio_id: null });
-    if (!distritoId) return;
-    this.api
-      .todos<Departamento>('catalogos/ubicacion/departamentos', { distrito_id: distritoId })
-      .subscribe((r) => this.opcionesDepartamento.set(r.data.map((d) => ({ label: d.nombre, value: d.id }))));
-  }
-
-  cambiarDepartamento(departamentoId: number | null): void {
+  cambiarDepartamento(departamentoId: number | null, mantenerMunicipio = false): void {
     this.departamentoSeleccionado.set(departamentoId);
-    this.opcionesMunicipio.set([]);
-    this.form.patchValue({ municipio_id: null });
-    if (!departamentoId) return;
-    this.api
-      .todos<Municipio>('catalogos/ubicacion/municipios', { departamento_id: departamentoId })
-      .subscribe((r) => this.opcionesMunicipio.set(r.data.map((m) => ({ label: m.nombre, value: m.id }))));
+    if (!mantenerMunicipio) {
+      this.form.patchValue({ municipio_id: null });
+    }
+    this.opcionesMunicipio.set(
+      departamentoId
+        ? this.todosMunicipios
+            .filter((m) => m.departamento_id === departamentoId)
+            .map((m) => ({ label: m.nombre, value: m.id }))
+        : [],
+    );
   }
 
   ministroActual(iglesiaId: number): string {
@@ -436,8 +440,6 @@ export class IglesiasComponent implements OnInit {
     this.errorForm.set([]);
     this.edicion.set(iglesia ?? null);
     this.distritoSeleccionado.set(iglesia?.distrito_id ?? null);
-    this.opcionesDepartamento.set([]);
-    this.opcionesMunicipio.set([]);
 
     if (iglesia) {
       this.form.reset({
@@ -448,14 +450,12 @@ export class IglesiasComponent implements OnInit {
         telefono: iglesia.telefono ?? '',
         fecha_fundacion: iglesia.fecha_fundacion ? isoAFechaLocal(iglesia.fecha_fundacion) : null,
       });
-      if (iglesia.distrito_id) {
-        this.api
-          .todos<Departamento>('catalogos/ubicacion/departamentos', { distrito_id: iglesia.distrito_id })
-          .subscribe((r) => this.opcionesDepartamento.set(r.data.map((d) => ({ label: d.nombre, value: d.id }))));
-      }
+      // El departamento no se guarda en la iglesia; se deduce del municipio actual.
+      const municipioActual = this.todosMunicipios.find((m) => m.id === iglesia.municipio_id);
+      this.cambiarDepartamento(municipioActual?.departamento_id ?? null, true);
     } else {
       this.form.reset({ municipio_id: null, direccion: '', telefono: '', fecha_fundacion: null });
-      this.departamentoSeleccionado.set(null);
+      this.cambiarDepartamento(null);
     }
     this.dialogo.set(true);
   }
