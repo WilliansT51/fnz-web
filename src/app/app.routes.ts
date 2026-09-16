@@ -144,6 +144,16 @@ export const routes: Routes = [
         title: 'Informes financieros · FNZ',
       },
       {
+        path: 'ofrendas/boletas-pastorales',
+        canActivate: [permisoGuard],
+        data: { permisos: ['boletas-pastorales.consultar'] },
+        loadComponent: () =>
+          import('./features/ofrendas/boletas-pastorales/boletas-pastorales.component').then(
+            (m) => m.BoletasPastoralesComponent,
+          ),
+        title: 'Boletas mensuales del pastor · FNZ',
+      },
+      {
         path: 'ofrendas/solicitudes',
         canActivate: [permisoGuard],
         data: { permisos: ['solicitudes.consultar'] },

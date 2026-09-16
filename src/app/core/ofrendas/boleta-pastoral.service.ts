@@ -1,0 +1,73 @@
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+import { Observable } from 'rxjs';
+import { environment } from '../../../environments/environment';
+import { BoletaPastoral, Paginado } from '../models/ofrendas.models';
+
+/** Línea a enviar al crear/actualizar una boleta pastoral. */
+export interface LineaBoletaPastoralNueva {
+  concepto_movimiento_id: number;
+  monto?: number;
+  descripcion?: string;
+}
+
+/**
+ * Cliente HTTP de la Boleta Mensual del pastor. Ver
+ * {@see \App\Http\Controllers\Ofrendas\BoletaPastoralController} en el
+ * backend.
+ */
+@Injectable({ providedIn: 'root' })
+export class BoletaPastoralService {
+  private readonly http = inject(HttpClient);
+  private readonly base = `${environment.apiUrl}/ofrendas/boletas-pastorales`;
+
+  /** Lista paginada, filtrable por iglesia_id, ministro_id, estado, mes, anio. */
+  listar(filtro: Record<string, unknown>): Observable<Paginado<BoletaPastoral>> {
+    let params = new HttpParams();
+    for (const [clave, valor] of Object.entries(filtro)) {
+      if (valor !== undefined && valor !== null && valor !== '') {
+        params = params.set(clave, String(valor));
+      }
+    }
+    return this.http.get<Paginado<BoletaPastoral>>(this.base, { params });
+  }
+
+  /** Detalle con líneas y su concepto. */
+  obtener(id: number): Observable<{ data: BoletaPastoral }> {
+    return this.http.get<{ data: BoletaPastoral }>(`${this.base}/${id}`);
+  }
+
+  /** Captura una boleta nueva (nace PENDIENTE). */
+  crear(
+    iglesiaId: number,
+    ministroId: number,
+    mes: number,
+    anio: number,
+    ofrendaAsignada: number,
+    lineas: LineaBoletaPastoralNueva[],
+  ): Observable<{ data: BoletaPastoral }> {
+    return this.http.post<{ data: BoletaPastoral }>(this.base, {
+      iglesia_id: iglesiaId,
+      ministro_id: ministroId,
+      mes,
+      anio,
+      ofrenda_asignada: ofrendaAsignada,
+      lineas,
+    });
+  }
+
+  /** Reemplaza la ofrenda asignada y las líneas de una boleta PENDIENTE. */
+  actualizar(id: number, ofrendaAsignada: number, lineas: LineaBoletaPastoralNueva[]): Observable<{ data: BoletaPastoral }> {
+    return this.http.put<{ data: BoletaPastoral }>(`${this.base}/${id}`, { ofrenda_asignada: ofrendaAsignada, lineas });
+  }
+
+  /** Aprueba una boleta pendiente. */
+  aprobar(id: number, comentario?: string): Observable<{ data: BoletaPastoral }> {
+    return this.http.post<{ data: BoletaPastoral }>(`${this.base}/${id}/aprobar`, { comentario });
+  }
+
+  /** Rechaza una boleta pendiente. */
+  rechazar(id: number, comentario?: string): Observable<{ data: BoletaPastoral }> {
+    return this.http.post<{ data: BoletaPastoral }>(`${this.base}/${id}/rechazar`, { comentario });
+  }
+}

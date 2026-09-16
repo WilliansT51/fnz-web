@@ -269,6 +269,39 @@ export interface InformeFinanciero {
   lineas?: InformeFinancieroLinea[];
 }
 
+/** Línea de detalle de una Boleta Mensual del pastor (ofrenda para una necesidad puntual). */
+export interface BoletaPastoralLinea {
+  id: number;
+  boleta_pastoral_id: number;
+  concepto_movimiento_id: number;
+  monto: string | null;
+  descripcion: string | null;
+  concepto?: ConceptoMovimiento;
+}
+
+/** Boleta Mensual del pastor: ofrenda asignada + necesidades básicas del ministro. */
+export interface BoletaPastoral {
+  id: number;
+  iglesia_id: number;
+  ministro_id: number;
+  mes: number;
+  anio: number;
+  estado: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO';
+  ofrenda_asignada: string;
+  total_necesidades: string;
+  total_general: string;
+  creado_por: number;
+  aprobador_id: number | null;
+  fecha_resolucion: string | null;
+  comentario_resolucion: string | null;
+  created_at: string;
+  iglesia?: { id: number; nombre: string; clave: string };
+  ministro?: { id: number; nombre: string; apellido: string };
+  creador?: { id: number; nombre: string; correo: string };
+  aprobador?: { id: number; nombre: string; correo: string } | null;
+  lineas?: BoletaPastoralLinea[];
+}
+
 /** Bandeja de solicitudes de cambio (maker-checker). */
 export interface SolicitudCambio {
   id: number;
