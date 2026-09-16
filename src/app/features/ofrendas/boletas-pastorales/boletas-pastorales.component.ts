@@ -31,14 +31,12 @@ const SEVERIDAD_ESTADO: Record<BoletaPastoral['estado'], 'warn' | 'success' | 'd
 interface FilaNecesidad {
   concepto: ConceptoMovimiento;
   monto: number | null;
-  descripcion: string;
 }
 
 /**
  * Boleta Mensual del pastor: ofrenda asignada (fija) + ofrendas para las
  * necesidades básicas del ministro (conceptos de la categoría "Necesidad
- * del ministro"). Cada línea admite un valor simbólico sin monto (solo
- * nota), igual que el formulario original.
+ * del ministro"), cada una con su monto.
  */
 @Component({
   selector: 'app-boletas-pastorales',
@@ -183,21 +181,13 @@ interface FilaNecesidad {
             <span class="nombre-concepto">{{ fila.concepto.nombre }}</span>
             <p-inputNumber
               [ngModel]="fila.monto"
-              (ngModelChange)="actualizarLinea(fila.concepto.id, 'monto', $event)"
+              (ngModelChange)="actualizarMontoNecesidad(fila.concepto.id, $event)"
               [ngModelOptions]="{ standalone: true }"
               mode="currency"
               currency="GTQ"
               locale="es-GT"
               [minFractionDigits]="2"
               placeholder="Q 0.00"
-            />
-            <input
-              pInputText
-              [ngModel]="fila.descripcion"
-              (ngModelChange)="actualizarLinea(fila.concepto.id, 'descripcion', $event)"
-              [ngModelOptions]="{ standalone: true }"
-              placeholder="Nota (ej. simbólico)"
-              class="nota"
             />
           </div>
         }
@@ -231,15 +221,13 @@ interface FilaNecesidad {
             <tr>
               <th>Necesidad</th>
               <th>Monto</th>
-              <th>Nota</th>
             </tr>
           </thead>
           <tbody>
             @for (l of b.lineas; track l.id) {
               <tr>
                 <td>{{ l.concepto?.nombre }}</td>
-                <td>{{ l.monto ? 'Q ' + l.monto : '—' }}</td>
-                <td>{{ l.descripcion || '—' }}</td>
+                <td>Q {{ l.monto }}</td>
               </tr>
             }
           </tbody>
@@ -286,9 +274,8 @@ interface FilaNecesidad {
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
       .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.9rem; }
       label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 500; }
-      .fila-necesidad { display: grid; grid-template-columns: 1fr 10rem 10rem; align-items: center; gap: 0.75rem; padding: 0.3rem 0; }
+      .fila-necesidad { display: grid; grid-template-columns: 1fr 10rem; align-items: center; gap: 0.75rem; padding: 0.3rem 0; }
       .nombre-concepto { font-size: 0.85rem; }
-      .nota { font-size: 0.82rem; }
       .resumen {
         display: grid;
         gap: 0.4rem;
@@ -377,14 +364,14 @@ export class BoletasPastoralesComponent implements OnInit {
       const idNecesidad = r.data.find((c) => c.nombre === 'Necesidad del ministro')?.id;
       this.catalogos.todos<ConceptoMovimiento>('catalogos/financiero/conceptos-movimiento').subscribe((r2) => {
         const necesidades = r2.data.filter((c) => c.categoria_concepto_id === idNecesidad);
-        this.filasNecesidad.set(necesidades.map((concepto) => ({ concepto, monto: null, descripcion: '' })));
+        this.filasNecesidad.set(necesidades.map((concepto) => ({ concepto, monto: null })));
       });
     });
   }
 
-  actualizarLinea(conceptoId: number, campo: 'monto' | 'descripcion', valor: number | string | null): void {
+  actualizarMontoNecesidad(conceptoId: number, monto: number | null): void {
     this.filasNecesidad.update((filas) =>
-      filas.map((f) => (f.concepto.id === conceptoId ? { ...f, [campo]: valor } : f)),
+      filas.map((f) => (f.concepto.id === conceptoId ? { ...f, monto } : f)),
     );
   }
 
@@ -428,7 +415,7 @@ export class BoletasPastoralesComponent implements OnInit {
       anio: new Date().getFullYear(),
       ofrenda_asignada: 0,
     });
-    this.filasNecesidad.update((filas) => filas.map((f) => ({ ...f, monto: null, descripcion: '' })));
+    this.filasNecesidad.update((filas) => filas.map((f) => ({ ...f, monto: null })));
     this.dialogoCaptura.set(true);
   }
 
@@ -439,12 +426,8 @@ export class BoletasPastoralesComponent implements OnInit {
 
     const v = this.formCabecera.getRawValue();
     const lineas: LineaBoletaPastoralNueva[] = this.filasNecesidad()
-      .filter((f) => (f.monto && f.monto > 0) || f.descripcion.trim())
-      .map((f) => ({
-        concepto_movimiento_id: f.concepto.id,
-        ...(f.monto ? { monto: f.monto } : {}),
-        ...(f.descripcion.trim() ? { descripcion: f.descripcion.trim() } : {}),
-      }));
+      .filter((f) => f.monto && f.monto > 0)
+      .map((f) => ({ concepto_movimiento_id: f.concepto.id, monto: f.monto as number }));
 
     this.api.crear(v.iglesia_id as number, v.ministro_id as number, v.mes, v.anio, v.ofrenda_asignada, lineas).subscribe({
       next: () => {

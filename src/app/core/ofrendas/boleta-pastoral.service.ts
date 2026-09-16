@@ -7,8 +7,7 @@ import { BoletaPastoral, Paginado } from '../models/ofrendas.models';
 /** Línea a enviar al crear/actualizar una boleta pastoral. */
 export interface LineaBoletaPastoralNueva {
   concepto_movimiento_id: number;
-  monto?: number;
-  descripcion?: string;
+  monto: number;
 }
 
 /**

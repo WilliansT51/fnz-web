@@ -274,8 +274,7 @@ export interface BoletaPastoralLinea {
   id: number;
   boleta_pastoral_id: number;
   concepto_movimiento_id: number;
-  monto: string | null;
-  descripcion: string | null;
+  monto: string;
   concepto?: ConceptoMovimiento;
 }
 
