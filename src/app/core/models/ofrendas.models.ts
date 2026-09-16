@@ -213,6 +213,62 @@ export interface CuentaBancaria {
   estado: boolean;
 }
 
+/** Boleta interna (§3.5): documento generado por el sistema, numeración correlativa por jurisdicción. */
+export interface Boleta {
+  id: number;
+  jurisdiccion_id: number;
+  iglesia_id: number | null;
+  numero: number;
+  fecha: string;
+  estado: 'activa' | 'anulada';
+}
+
+/** Línea de detalle de un Informe Financiero Mensual. */
+export interface InformeFinancieroLinea {
+  id: number;
+  informe_id: number;
+  concepto_movimiento_id: number;
+  boleta_id: number | null;
+  monto: string;
+  fecha: string | null;
+  descripcion: string | null;
+  concepto?: ConceptoMovimiento & { categoria?: { id: number; nombre: string } };
+  boleta?: Boleta;
+}
+
+/** Datos de una línea al enviar el formulario de captura (antes de guardarse). */
+export interface LineaInformeNueva {
+  concepto_movimiento_id: number;
+  monto: number;
+  fecha?: string;
+  descripcion?: string;
+  boleta_agrupador?: string;
+}
+
+/** Informe Financiero Mensual de una iglesia. */
+export interface InformeFinanciero {
+  id: number;
+  iglesia_id: number;
+  mes: number;
+  anio: number;
+  estado: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO';
+  total_ingresos_ofrenda: string;
+  total_egresos_ofrenda: string;
+  total_colectas: string;
+  total_necesidades_pastor: string;
+  total_general: string;
+  cuadra: boolean;
+  creado_por: number;
+  aprobador_id: number | null;
+  fecha_resolucion: string | null;
+  comentario_resolucion: string | null;
+  created_at: string;
+  iglesia?: { id: number; nombre: string; clave: string };
+  creador?: { id: number; nombre: string; correo: string };
+  aprobador?: { id: number; nombre: string; correo: string } | null;
+  lineas?: InformeFinancieroLinea[];
+}
+
 /** Bandeja de solicitudes de cambio (maker-checker). */
 export interface SolicitudCambio {
   id: number;

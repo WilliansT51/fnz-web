@@ -134,6 +134,16 @@ export const routes: Routes = [
         title: 'Catálogos financieros · FNZ',
       },
       {
+        path: 'ofrendas/informes',
+        canActivate: [permisoGuard],
+        data: { permisos: ['informes.consultar'] },
+        loadComponent: () =>
+          import('./features/ofrendas/informes/informes.component').then(
+            (m) => m.InformesComponent,
+          ),
+        title: 'Informes financieros · FNZ',
+      },
+      {
         path: 'ofrendas/solicitudes',
         canActivate: [permisoGuard],
         data: { permisos: ['solicitudes.consultar'] },
