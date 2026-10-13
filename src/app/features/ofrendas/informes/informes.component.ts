@@ -1,7 +1,8 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
+import { forkJoin, of } from 'rxjs';
 import { TableLazyLoadEvent, TableModule } from 'primeng/table';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
@@ -17,7 +18,14 @@ import { TienePermisoDirective } from '../../../core/auth/tiene-permiso.directiv
 import { CatalogoService } from '../../../core/ofrendas/catalogo.service';
 import { InformeFinancieroService } from '../../../core/ofrendas/informe-financiero.service';
 import { fechaLocalAIso } from '../../../core/ofrendas/fecha.util';
-import { ConceptoMovimiento, Iglesia, InformeFinanciero, OpcionSelect } from '../../../core/models/ofrendas.models';
+import {
+  ConceptoMovimiento,
+  Iglesia,
+  InformeFinanciero,
+  InformeFinancieroLinea,
+  LineaInformeNueva,
+  OpcionSelect,
+} from '../../../core/models/ofrendas.models';
 
 const MESES: OpcionSelect[] = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -30,25 +38,65 @@ const SEVERIDAD_ESTADO: Record<InformeFinanciero['estado'], 'warn' | 'success' |
   RECHAZADO: 'danger',
 };
 
-interface FilaConcepto {
-  concepto: ConceptoMovimiento;
-  monto: number | null;
+/** Porcentaje del diezmo mostrado en pantalla; el backend calcula el valor definitivo con el parámetro del sistema. */
+const PORCENTAJE_DIEZMO = 10;
+
+/** Un renglón numerado del formulario, enlazado a un concepto del catálogo por su código. */
+interface Renglon {
+  numero: number;
+  codigo: string;
+  etiqueta: string;
 }
 
+/** Datos de boleta física capturados a mano para un renglón de colecta. */
+interface DatosBoleta {
+  numero: string;
+  fecha: Date | null;
+  archivo: File | null;
+}
+
+/** Ingresos por ofrenda (columna izquierda del formulario original). */
+const INGRESOS: Renglon[] = [
+  { numero: 1, codigo: 'ING-DIEZMO', etiqueta: 'Ofrenda Diezmos' },
+  { numero: 2, codigo: 'ING-PERSONAL', etiqueta: 'Ofrenda Personal' },
+  { numero: 3, codigo: 'ING-ORDINARIA', etiqueta: 'Ofrenda Ordinaria' },
+  { numero: 4, codigo: 'ING-PRIMICIAS', etiqueta: 'Ofrenda Primicias' },
+];
+
+/** Colectas y ofrendas especiales, en el orden del formulario original. */
+const COLECTAS: Renglon[] = [
+  { numero: 1, codigo: 'COL-MANTENIMIENTO', etiqueta: 'Ofrenda Mantenimiento y Conservación' },
+  { numero: 2, codigo: 'COL-SERVICIOS', etiqueta: 'Ofrenda Pago de Servicios Públicos' },
+  { numero: 3, codigo: 'COL-CONSTRUCCION', etiqueta: 'Ofrenda Construcción Local' },
+  { numero: 4, codigo: 'COL-INMUEBLES', etiqueta: 'Ofrenda Adquisición de Inmuebles' },
+  { numero: 5, codigo: 'COL-MUEBLES', etiqueta: 'Ofrenda Adquisición de Muebles y Artículos de Inventario' },
+  { numero: 6, codigo: 'COL-EVANGELIZACION', etiqueta: 'Ofrenda Gastos Evangelización Local' },
+  { numero: 7, codigo: 'COL-14FEB', etiqueta: 'Ofrenda Colecta 14 de Febrero' },
+  { numero: 8, codigo: 'COL-CENTRORECREATIVO', etiqueta: 'Ofrenda Colecta Mantenimiento Centro Recreativo Dr. NJG' },
+  { numero: 9, codigo: 'COL-SANTACENA', etiqueta: 'Ofrenda Colecta Santa Cena' },
+  { numero: 10, codigo: 'COL-TERRENONAL', etiqueta: 'Ofrenda Colecta Terreno Nacional en Guatemala' },
+  { numero: 11, codigo: 'COL-GUADALAJARA', etiqueta: 'Ofrenda Viajes a Guadalajara, México' },
+  { numero: 12, codigo: 'ESP-MAYO', etiqueta: 'Ofrenda Especial 07 de Mayo' },
+  { numero: 13, codigo: 'ESP-SEPTIEMBRE', etiqueta: 'Ofrenda Especial 15 de Septiembre' },
+  { numero: 14, codigo: 'COL-OTRAS', etiqueta: 'Otras Ofrendas Colectas' },
+];
+
 /**
- * Informe Financiero Mensual: lista + captura (una fila por concepto de
- * movimiento vigente, agrupada por categoría) + aprobación. Todas las
- * líneas que exigen boleta comparten UNA boleta interna del informe
- * (numeración correlativa automática, ver
- * {@see \App\Services\Ofrendas\BoletaService} en el backend); las que no,
- * usan la fecha del informe.
+ * Informe Financiero Mensual. Replica el formulario original:
+ *  - Ingresos por ofrenda (1-4) con su total.
+ *  - Egresos de ofrenda: 1 Diezmo (10 % de los ingresos, automático),
+ *    2 Familiar, 3 Remanente (automático = ingresos − 1 − 2 − 4 − 5),
+ *    4 Obreros, 5 Otras; el total de egresos siempre iguala al de ingresos.
+ *  - Ingresos y egresos por colectas (1-14), donde las que traen boleta
+ *    física piden No. de boleta, fecha y archivo escaneado.
+ *  - Total general = ingresos por ofrenda + colectas.
+ * El diezmo y el remanente también los recalcula el backend.
  */
 @Component({
   selector: 'app-informes',
   imports: [
     ReactiveFormsModule,
     FormsModule,
-    DatePipe,
     DecimalPipe,
     TableModule,
     ButtonModule,
@@ -161,7 +209,7 @@ interface FilaConcepto {
       header="Nuevo informe financiero mensual"
       [(visible)]="dialogoCaptura"
       [modal]="true"
-      [style]="{ width: '52rem' }"
+      [style]="{ width: '62rem', maxWidth: '96vw' }"
     >
       <form class="formulario" [formGroup]="formCabecera" (ngSubmit)="guardarInforme()">
         <div class="grid3">
@@ -186,19 +234,48 @@ interface FilaConcepto {
           </label>
         </div>
         <label>
-          <span>Fecha del informe (para conceptos sin boleta)</span>
+          <span>Fecha del informe (para los renglones sin boleta)</span>
           <p-datePicker formControlName="fecha" dateFormat="yy-mm-dd" [style]="{ maxWidth: '14rem' }" />
         </label>
 
-        @for (grupo of gruposConceptos(); track grupo.nombre) {
-          <div class="grupo-conceptos">
-            <p class="fnz-titulo-seccion">{{ grupo.nombre }}</p>
-            @for (fila of grupo.filas; track fila.concepto.id) {
+        <!-- Parte 1: ingresos y egresos de ofrenda -->
+        <div class="bloque">
+          <div class="dos-columnas">
+            <section>
+              <h3 class="titulo-bloque">Ingresos por ofrenda</h3>
+              @for (r of ingresos; track r.codigo) {
+                <div class="fila-concepto">
+                  <span class="nombre-concepto">{{ r.numero }}. {{ r.etiqueta }}</span>
+                  <p-inputNumber
+                    [ngModel]="monto(r.codigo)"
+                    (ngModelChange)="setMonto(r.codigo, $event)"
+                    [ngModelOptions]="{ standalone: true }"
+                    mode="currency"
+                    currency="GTQ"
+                    locale="es-GT"
+                    [minFractionDigits]="2"
+                    placeholder="Q 0.00"
+                  />
+                </div>
+              }
+              <div class="total-linea">
+                <span>Total de ingresos por ofrendas</span>
+                <span class="chip">{{ porcentajeDiezmo }}%</span>
+                <strong>Q {{ totalIngresos() | number: '1.2-2' }}</strong>
+              </div>
+            </section>
+
+            <section>
+              <h3 class="titulo-bloque">Egresos de ofrenda</h3>
               <div class="fila-concepto">
-                <span class="nombre-concepto">{{ fila.concepto.nombre }}</span>
+                <span class="nombre-concepto">1. Ofrenda Diezmos <small>({{ porcentajeDiezmo }}% de los ingresos)</small></span>
+                <span class="calculado">Q {{ diezmo() | number: '1.2-2' }}</span>
+              </div>
+              <div class="fila-concepto">
+                <span class="nombre-concepto">2. Ofrenda Familiar</span>
                 <p-inputNumber
-                  [ngModel]="fila.monto"
-                  (ngModelChange)="actualizarMonto(fila.concepto.id, $event)"
+                  [ngModel]="monto('EGR-FAMILIAR')"
+                  (ngModelChange)="setMonto('EGR-FAMILIAR', $event)"
                   [ngModelOptions]="{ standalone: true }"
                   mode="currency"
                   currency="GTQ"
@@ -207,22 +284,111 @@ interface FilaConcepto {
                   placeholder="Q 0.00"
                 />
               </div>
-            }
+              <div class="fila-concepto">
+                <span class="nombre-concepto">3. Remanente <small>(remesar al Ministerio)</small></span>
+                <span class="calculado" [class.negativo]="remanente() < 0">Q {{ remanente() | number: '1.2-2' }}</span>
+              </div>
+              <div class="fila-concepto">
+                <span class="nombre-concepto">4. Ofrenda a Obreros <small>(tomado del remanente)</small></span>
+                <p-inputNumber
+                  [ngModel]="monto('EGR-OBREROS')"
+                  (ngModelChange)="setMonto('EGR-OBREROS', $event)"
+                  [ngModelOptions]="{ standalone: true }"
+                  mode="currency"
+                  currency="GTQ"
+                  locale="es-GT"
+                  [minFractionDigits]="2"
+                  placeholder="Q 0.00"
+                />
+              </div>
+              <div class="fila-concepto">
+                <span class="nombre-concepto">5. Otras Ofrendas</span>
+                <p-inputNumber
+                  [ngModel]="monto('EGR-OTRAS')"
+                  (ngModelChange)="setMonto('EGR-OTRAS', $event)"
+                  [ngModelOptions]="{ standalone: true }"
+                  mode="currency"
+                  currency="GTQ"
+                  locale="es-GT"
+                  [minFractionDigits]="2"
+                  placeholder="Q 0.00"
+                />
+              </div>
+              <div class="total-linea">
+                <span>Total de egresos por ofrendas</span>
+                <strong>Q {{ totalEgresos() | number: '1.2-2' }}</strong>
+              </div>
+            </section>
           </div>
-        }
-
-        <div class="resumen">
-          <div><span>Total ingresos de ofrenda</span><strong>Q {{ totalIngresos() | number: '1.2-2' }}</strong></div>
-          <div><span>Total egresos de distribución</span><strong>Q {{ totalEgresos() | number: '1.2-2' }}</strong></div>
-          <div>
-            <span>Cuadre</span>
-            <p-tag [value]="cuadra() ? 'Cuadra' : 'No cuadra'" [severity]="cuadra() ? 'success' : 'danger'" />
-          </div>
-          <div><span>Total colectas</span><strong>Q {{ totalColectas() | number: '1.2-2' }}</strong></div>
-          <div><span>Total necesidades del ministro</span><strong>Q {{ totalNecesidades() | number: '1.2-2' }}</strong></div>
-          <div class="general"><span>Total general</span><strong>Q {{ totalGeneral() | number: '1.2-2' }}</strong></div>
+          @if (remanente() < 0) {
+            <p class="aviso-error">Ofrenda familiar, a obreros y otras superan el remanente disponible (ingresos menos diezmo).</p>
+          }
         </div>
 
+        <!-- Parte 2: colectas -->
+        <div class="bloque">
+          <h3 class="titulo-bloque">Ingresos y egresos de ofrenda por colectas</h3>
+          @for (r of colectas; track r.codigo) {
+            <div class="renglon-colecta">
+              <div class="fila-concepto">
+                <span class="nombre-concepto">{{ r.numero }}. {{ r.etiqueta }}</span>
+                <p-inputNumber
+                  [ngModel]="monto(r.codigo)"
+                  (ngModelChange)="setMonto(r.codigo, $event)"
+                  [ngModelOptions]="{ standalone: true }"
+                  mode="currency"
+                  currency="GTQ"
+                  locale="es-GT"
+                  [minFractionDigits]="2"
+                  placeholder="Q 0.00"
+                />
+              </div>
+              @if (requiereBoleta(r.codigo)) {
+                <div class="datos-boleta">
+                  <input
+                    pInputText
+                    class="campo-boleta"
+                    placeholder="No. de boleta"
+                    [ngModel]="datosBoleta(r.codigo).numero"
+                    (ngModelChange)="setBoleta(r.codigo, 'numero', $event)"
+                    [ngModelOptions]="{ standalone: true }"
+                  />
+                  <p-datePicker
+                    placeholder="Fecha"
+                    dateFormat="yy-mm-dd"
+                    [ngModel]="datosBoleta(r.codigo).fecha"
+                    (ngModelChange)="setBoleta(r.codigo, 'fecha', $event)"
+                    [ngModelOptions]="{ standalone: true }"
+                    [style]="{ width: '9rem' }"
+                  />
+                  <label class="subir">
+                    <i class="pi pi-upload"></i>
+                    <span>{{ datosBoleta(r.codigo).archivo?.name ?? 'Cargar boleta (PDF/imagen)' }}</span>
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png"
+                      (change)="elegirArchivo(r.codigo, $event)"
+                      hidden
+                    />
+                  </label>
+                </div>
+              }
+            </div>
+          }
+          <div class="total-linea">
+            <span>Total de ingresos y egresos de ofrendas por colectas</span>
+            <strong>Q {{ totalColectas() | number: '1.2-2' }}</strong>
+          </div>
+        </div>
+
+        <div class="total-general">
+          <span>TOTAL GENERAL <small>(Total de ingresos por ofrendas más total por colectas)</small></span>
+          <strong>Q {{ totalGeneral() | number: '1.2-2' }}</strong>
+        </div>
+
+        @if (faltanDatosBoleta()) {
+          <p class="aviso-error">Los renglones de colecta con boleta física requieren No. de boleta y fecha cuando llevan monto.</p>
+        }
         @if (errorForm().length) {
           <ul class="errores">
             @for (e of errorForm(); track e) { <li>{{ e }}</li> }
@@ -235,14 +401,14 @@ interface FilaConcepto {
             label="Guardar informe"
             type="submit"
             [loading]="guardando()"
-            [disabled]="formCabecera.invalid || guardando() || totalGeneral() === 0"
+            [disabled]="formCabecera.invalid || guardando() || totalGeneral() === 0 || remanente() < 0 || faltanDatosBoleta()"
           />
         </div>
       </form>
     </p-dialog>
 
     <!-- Diálogo de detalle -->
-    <p-dialog header="Detalle del informe" [(visible)]="dialogoDetalle" [modal]="true" [style]="{ width: '40rem' }">
+    <p-dialog header="Detalle del informe" [(visible)]="dialogoDetalle" [modal]="true" [style]="{ width: '46rem', maxWidth: '96vw' }">
       @if (informeActivo(); as i) {
         <p class="fnz-subtitulo">{{ i.iglesia?.nombre }} — {{ nombreMes(i.mes) }} {{ i.anio }}</p>
         <table class="tabla-lineas">
@@ -250,7 +416,8 @@ interface FilaConcepto {
             <tr>
               <th>Concepto</th>
               <th>Monto</th>
-              <th>Boleta</th>
+              <th>Boleta / fecha</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -258,7 +425,12 @@ interface FilaConcepto {
               <tr>
                 <td>{{ l.concepto?.nombre }}</td>
                 <td>Q {{ l.monto }}</td>
-                <td>{{ l.boleta ? '#' + l.boleta.numero : (l.fecha | date: 'dd/MM/yyyy':'UTC') }}</td>
+                <td>{{ referenciaBoleta(l) }}</td>
+                <td>
+                  @if (l.tiene_archivo_boleta) {
+                    <p-button icon="pi pi-file" label="Ver boleta" size="small" [text]="true" (onClick)="verArchivo(i.id, l)" />
+                  }
+                </td>
               </tr>
             }
           </tbody>
@@ -303,25 +475,40 @@ interface FilaConcepto {
       .formulario { display: flex; flex-direction: column; gap: 0.9rem; padding-top: 0.5rem; }
       .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.9rem; }
       label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 500; }
-      .grupo-conceptos { border-top: 1px solid var(--fnz-borde); padding-top: 0.75rem; }
-      .fila-concepto { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.3rem 0; }
+      .bloque { border: 1px solid var(--fnz-borde); border-radius: 8px; padding: 0.9rem 1rem; }
+      .dos-columnas { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+      .titulo-bloque { margin: 0 0 0.6rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+      .fila-concepto { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.25rem 0; }
       .nombre-concepto { font-size: 0.85rem; }
-      .resumen {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.5rem 1.5rem;
-        background: var(--fnz-fondo);
-        border-radius: 8px;
-        padding: 0.9rem;
-        font-size: 0.85rem;
+      .nombre-concepto small { color: var(--fnz-tinta-suave); }
+      .calculado { font-weight: 600; font-size: 0.9rem; min-width: 8rem; text-align: right; padding-right: 0.75rem; }
+      .calculado.negativo { color: #c0392b; }
+      .total-linea {
+        display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;
+        border-top: 1px solid var(--fnz-borde); margin-top: 0.5rem; padding-top: 0.5rem; font-size: 0.85rem;
       }
-      .resumen div { display: flex; justify-content: space-between; align-items: center; }
-      .resumen .general { grid-column: 1 / -1; border-top: 1px solid var(--fnz-borde); padding-top: 0.5rem; font-size: 0.95rem; }
+      .total-linea strong { min-width: 8rem; text-align: right; padding-right: 0.75rem; }
+      .chip { background: var(--fnz-fondo); border-radius: 999px; padding: 0.1rem 0.5rem; font-size: 0.75rem; }
+      .renglon-colecta { padding-bottom: 0.2rem; }
+      .datos-boleta { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; padding: 0.1rem 0 0.5rem 1.2rem; }
+      .campo-boleta { width: 10rem; }
+      .subir {
+        flex-direction: row; align-items: center; gap: 0.4rem; cursor: pointer; font-weight: 400;
+        border: 1px dashed var(--fnz-borde); border-radius: 6px; padding: 0.4rem 0.7rem;
+      }
+      .total-general {
+        display: flex; justify-content: space-between; align-items: center;
+        background: var(--fnz-fondo); border-radius: 8px; padding: 0.8rem 1rem; font-size: 0.95rem;
+      }
+      .total-general small { font-weight: 400; color: var(--fnz-tinta-suave); }
+      .total-general strong { font-size: 1.05rem; padding-right: 0.75rem; }
+      .aviso-error { margin: 0; color: #c0392b; font-size: 0.82rem; }
       .errores { margin: 0; padding-left: 1.1rem; color: #c0392b; font-size: 0.82rem; }
       .pie { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
       .campo { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 500; margin: 0.9rem 0; }
       .tabla-lineas { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.85rem; }
       .tabla-lineas th, .tabla-lineas td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--fnz-borde); }
+      @media (max-width: 900px) { .dos-columnas { grid-template-columns: 1fr; } }
     `,
   ],
 })
@@ -338,14 +525,21 @@ export class InformesComponent implements OnInit {
     { label: 'Aprobado', value: 'APROBADO' },
     { label: 'Rechazado', value: 'RECHAZADO' },
   ];
+  readonly ingresos = INGRESOS;
+  readonly colectas = COLECTAS;
+  readonly porcentajeDiezmo = PORCENTAJE_DIEZMO;
 
   readonly informes = signal<InformeFinanciero[]>([]);
   readonly total = signal(0);
   readonly cargando = signal(false);
   readonly filtroEstado = signal<string | null>('PENDIENTE');
   readonly opcionesIglesia = signal<OpcionSelect[]>([]);
-  readonly conceptos = signal<ConceptoMovimiento[]>([]);
-  readonly filasPorConcepto = signal<FilaConcepto[]>([]);
+  readonly conceptosPorCodigo = signal<Record<string, ConceptoMovimiento>>({});
+
+  /** Montos digitados, por código de concepto. */
+  readonly montos = signal<Record<string, number | null>>({});
+  /** Boleta física (No., fecha, archivo) por código de concepto de colecta. */
+  readonly boletas = signal<Record<string, DatosBoleta>>({});
 
   readonly dialogoCaptura = signal(false);
   readonly guardando = signal(false);
@@ -368,75 +562,65 @@ export class InformesComponent implements OnInit {
     fecha: [new Date(), Validators.required],
   });
 
-  /** Categorías en el orden en que deben mostrarse en el formulario de captura. */
-  private readonly ordenCategorias = ['Ordinaria', 'Colecta', 'Especial', 'Necesidad del ministro'];
-
-  readonly gruposConceptos = computed(() => {
-    const filas = this.filasPorConcepto();
-    const porCategoria = new Map<string, FilaConcepto[]>();
-    for (const fila of filas) {
-      const nombre = fila.concepto.categoria_concepto_id ? this.nombreCategoria(fila.concepto) : 'Otros';
-      if (!porCategoria.has(nombre)) porCategoria.set(nombre, []);
-      porCategoria.get(nombre)!.push(fila);
-    }
-    return this.ordenCategorias
-      .filter((c) => porCategoria.has(c))
-      .map((nombre) => ({ nombre: this.etiquetaCategoria(nombre), filas: porCategoria.get(nombre)! }));
+  readonly totalIngresos = computed(() => this.suma(INGRESOS.map((r) => r.codigo)));
+  readonly diezmo = computed(() => Math.round(this.totalIngresos() * PORCENTAJE_DIEZMO) / 100);
+  readonly remanente = computed(() => {
+    if (this.totalIngresos() <= 0) return 0;
+    const descuentos = this.suma(['EGR-FAMILIAR', 'EGR-OBREROS', 'EGR-OTRAS']);
+    return Math.round((this.totalIngresos() - this.diezmo() - descuentos) * 100) / 100;
   });
-
-  readonly totalIngresos = computed(() => this.sumaPor((f) => this.nombreCategoria(f.concepto) === 'Ordinaria' && f.concepto.tipo === 'INGRESO'));
-  readonly totalEgresos = computed(() => this.sumaPor((f) => this.nombreCategoria(f.concepto) === 'Ordinaria' && f.concepto.tipo === 'EGRESO'));
-  readonly totalColectas = computed(() => this.sumaPor((f) => ['Colecta', 'Especial'].includes(this.nombreCategoria(f.concepto))));
-  readonly totalNecesidades = computed(() => this.sumaPor((f) => this.nombreCategoria(f.concepto) === 'Necesidad del ministro'));
+  readonly totalEgresos = computed(
+    () => this.diezmo() + this.suma(['EGR-FAMILIAR', 'EGR-OBREROS', 'EGR-OTRAS']) + Math.max(this.remanente(), 0),
+  );
+  readonly totalColectas = computed(() => this.suma(COLECTAS.map((r) => r.codigo)));
   readonly totalGeneral = computed(() => this.totalIngresos() + this.totalColectas());
-  readonly cuadra = computed(() => Math.abs(this.totalIngresos() - this.totalEgresos()) < 0.01);
 
-  private categoriasPorId = new Map<number, string>();
+  /** Hay renglones de colecta con boleta física y monto, pero sin No. de boleta o fecha. */
+  readonly faltanDatosBoleta = computed(() =>
+    COLECTAS.some((r) => {
+      if (!this.requiereBoleta(r.codigo) || (this.monto(r.codigo) ?? 0) <= 0) return false;
+      const b = this.datosBoleta(r.codigo);
+      return !b.numero.trim() || !b.fecha;
+    }),
+  );
 
   ngOnInit(): void {
     this.catalogos.todos<Iglesia>('catalogos/eclesiastico/iglesias').subscribe((r) => {
       this.opcionesIglesia.set(r.data.map((i) => ({ label: `${i.nombre} (${i.clave})`, value: i.id })));
     });
-    // El endpoint ?todos=1 de conceptos no trae la relación `categoria`
-    // cargada, así que el nombre de cada categoría se resuelve aparte;
-    // se encadena para que el mapa ya esté listo cuando se fijen las
-    // filas (categoriasPorId es un Map plano, no una señal, así que debe
-    // estar completo ANTES de la única escritura que dispara el recálculo).
-    this.catalogos.todos<{ id: number; nombre: string }>('catalogos/financiero/categorias-concepto').subscribe((r) => {
-      for (const cat of r.data) this.categoriasPorId.set(cat.id, cat.nombre);
-
-      this.catalogos.todos<ConceptoMovimiento>('catalogos/financiero/conceptos-movimiento').subscribe((r2) => {
-        this.conceptos.set(r2.data);
-        this.filasPorConcepto.set(r2.data.map((concepto) => ({ concepto, monto: null })));
-      });
+    this.catalogos.todos<ConceptoMovimiento>('catalogos/financiero/conceptos-movimiento').subscribe((r) => {
+      this.conceptosPorCodigo.set(Object.fromEntries(r.data.map((c) => [c.codigo, c])));
     });
   }
 
-  /** Reemplaza el array de filas (no muta los objetos existentes) para que los totales `computed` se recalculen. */
-  actualizarMonto(conceptoId: number, monto: number | null): void {
-    this.filasPorConcepto.update((filas) =>
-      filas.map((f) => (f.concepto.id === conceptoId ? { ...f, monto } : f)),
-    );
+  private suma(codigos: string[]): number {
+    return codigos.reduce((acc, c) => acc + (this.montos()[c] ?? 0), 0);
   }
 
-  private nombreCategoria(concepto: ConceptoMovimiento): string {
-    return this.categoriasPorId.get(concepto.categoria_concepto_id) ?? '';
+  monto(codigo: string): number | null {
+    return this.montos()[codigo] ?? null;
   }
 
-  private etiquetaCategoria(nombre: string): string {
-    const etiquetas: Record<string, string> = {
-      Ordinaria: 'Ingresos y distribución de ofrenda',
-      Colecta: 'Colectas',
-      Especial: 'Ofrendas especiales',
-      'Necesidad del ministro': 'Necesidades del ministro',
-    };
-    return etiquetas[nombre] ?? nombre;
+  setMonto(codigo: string, valor: number | null): void {
+    this.montos.update((m) => ({ ...m, [codigo]: valor }));
   }
 
-  private sumaPor(filtro: (f: FilaConcepto) => boolean): number {
-    return this.filasPorConcepto()
-      .filter((f) => filtro(f) && f.monto)
-      .reduce((acc, f) => acc + (f.monto ?? 0), 0);
+  /** Indica si el concepto captura la boleta a mano (No., fecha y archivo). */
+  requiereBoleta(codigo: string): boolean {
+    return this.conceptosPorCodigo()[codigo]?.boleta_manual ?? false;
+  }
+
+  datosBoleta(codigo: string): DatosBoleta {
+    return this.boletas()[codigo] ?? { numero: '', fecha: null, archivo: null };
+  }
+
+  setBoleta<K extends keyof DatosBoleta>(codigo: string, campo: K, valor: DatosBoleta[K]): void {
+    this.boletas.update((b) => ({ ...b, [codigo]: { ...this.datosBoleta(codigo), [campo]: valor } }));
+  }
+
+  elegirArchivo(codigo: string, evento: Event): void {
+    const archivo = (evento.target as HTMLInputElement).files?.[0] ?? null;
+    this.setBoleta(codigo, 'archivo', archivo);
   }
 
   nombreMes(mes: number): string {
@@ -445,6 +629,14 @@ export class InformesComponent implements OnInit {
 
   severidad(estado: InformeFinanciero['estado']) {
     return SEVERIDAD_ESTADO[estado];
+  }
+
+  /** Texto de la columna "Boleta / fecha" del detalle. */
+  referenciaBoleta(l: InformeFinancieroLinea): string {
+    const fecha = l.fecha ? l.fecha.slice(0, 10).split('-').reverse().join('/') : '';
+    if (l.boleta) return `#${l.boleta.numero}`;
+    if (l.boleta_numero) return `No. ${l.boleta_numero}${fecha ? ' · ' + fecha : ''}`;
+    return fecha || '—';
   }
 
   cargar(evento: TableLazyLoadEvent): void {
@@ -478,8 +670,44 @@ export class InformesComponent implements OnInit {
       anio: new Date().getFullYear(),
       fecha: new Date(),
     });
-    this.filasPorConcepto.update((filas) => filas.map((f) => ({ ...f, monto: null })));
+    this.montos.set({});
+    this.boletas.set({});
     this.dialogoCaptura.set(true);
+  }
+
+  /** Arma las líneas a enviar; el diezmo y el remanente los genera el backend. */
+  private armarLineas(fechaInforme: string): LineaInformeNueva[] {
+    const lineas: LineaInformeNueva[] = [];
+    const concepto = (codigo: string) => this.conceptosPorCodigo()[codigo];
+
+    for (const codigo of INGRESOS.map((r) => r.codigo)) {
+      const monto = this.monto(codigo);
+      if (monto && monto > 0) {
+        lineas.push({ concepto_movimiento_id: concepto(codigo).id, monto, boleta_agrupador: 'informe' });
+      }
+    }
+    for (const codigo of ['EGR-FAMILIAR', 'EGR-OBREROS', 'EGR-OTRAS']) {
+      const monto = this.monto(codigo);
+      if (monto && monto > 0) {
+        lineas.push({ concepto_movimiento_id: concepto(codigo).id, monto, fecha: fechaInforme });
+      }
+    }
+    for (const { codigo } of COLECTAS) {
+      const monto = this.monto(codigo);
+      if (!monto || monto <= 0) continue;
+      if (this.requiereBoleta(codigo)) {
+        const b = this.datosBoleta(codigo);
+        lineas.push({
+          concepto_movimiento_id: concepto(codigo).id,
+          monto,
+          boleta_numero: b.numero.trim(),
+          fecha: fechaLocalAIso(b.fecha as Date),
+        });
+      } else {
+        lineas.push({ concepto_movimiento_id: concepto(codigo).id, monto, fecha: fechaInforme });
+      }
+    }
+    return lineas;
   }
 
   guardarInforme(): void {
@@ -488,23 +716,10 @@ export class InformesComponent implements OnInit {
     this.errorForm.set([]);
 
     const v = this.formCabecera.getRawValue();
-    const fecha = fechaLocalAIso(v.fecha);
-
-    const lineas = this.filasPorConcepto()
-      .filter((f) => f.monto && f.monto > 0)
-      .map((f) => ({
-        concepto_movimiento_id: f.concepto.id,
-        monto: f.monto as number,
-        ...(f.concepto.aplica_boleta ? { boleta_agrupador: 'informe' } : { fecha }),
-      }));
+    const lineas = this.armarLineas(fechaLocalAIso(v.fecha));
 
     this.api.crear(v.iglesia_id as number, v.mes, v.anio, lineas).subscribe({
-      next: () => {
-        this.guardando.set(false);
-        this.dialogoCaptura.set(false);
-        this.mensajes.add({ severity: 'success', summary: 'Informe creado, queda pendiente de aprobación' });
-        this.recargar();
-      },
+      next: (r) => this.subirArchivos(r.data),
       error: (e: HttpErrorResponse) => {
         this.guardando.set(false);
         if (e.status === 422) {
@@ -516,10 +731,47 @@ export class InformesComponent implements OnInit {
     });
   }
 
+  /** Sube las boletas escaneadas elegidas, una por línea de colecta, una vez creado el informe. */
+  private subirArchivos(informe: InformeFinanciero): void {
+    const cargas = COLECTAS.map((r) => ({ r, archivo: this.datosBoleta(r.codigo).archivo }))
+      .filter((c) => c.archivo)
+      .map((c) => {
+        const idConcepto = this.conceptosPorCodigo()[c.r.codigo].id;
+        const linea = informe.lineas?.find((l) => l.concepto_movimiento_id === idConcepto);
+        return linea ? this.api.subirBoleta(informe.id, linea.id, c.archivo as File) : of(null);
+      });
+
+    forkJoin(cargas.length ? cargas : [of(null)]).subscribe({
+      next: () => this.terminarGuardado(),
+      error: () => {
+        this.mensajes.add({
+          severity: 'warn',
+          summary: 'Informe guardado, pero no se pudo cargar alguna boleta',
+          detail: 'Revisá el detalle del informe.',
+        });
+        this.terminarGuardado();
+      },
+    });
+  }
+
+  private terminarGuardado(): void {
+    this.guardando.set(false);
+    this.dialogoCaptura.set(false);
+    this.mensajes.add({ severity: 'success', summary: 'Informe creado, queda pendiente de aprobación' });
+    this.recargar();
+  }
+
   verDetalle(informe: InformeFinanciero): void {
     this.api.obtener(informe.id).subscribe((r) => {
       this.informeActivo.set(r.data);
       this.dialogoDetalle.set(true);
+    });
+  }
+
+  /** Descarga la boleta escaneada y la abre en una pestaña nueva. */
+  verArchivo(informeId: number, linea: InformeFinancieroLinea): void {
+    this.api.descargarBoleta(informeId, linea.id).subscribe((blob) => {
+      window.open(URL.createObjectURL(blob), '_blank');
     });
   }
 

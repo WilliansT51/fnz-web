@@ -189,6 +189,7 @@ export interface ConceptoMovimiento {
   es_nacional: boolean;
   es_especial: boolean;
   aplica_boleta: boolean;
+  boleta_manual: boolean;
   estado: boolean;
 }
 
@@ -229,6 +230,9 @@ export interface InformeFinancieroLinea {
   informe_id: number;
   concepto_movimiento_id: number;
   boleta_id: number | null;
+  boleta_numero: string | null;
+  archivo_boleta_nombre: string | null;
+  tiene_archivo_boleta: boolean;
   monto: string;
   fecha: string | null;
   descripcion: string | null;
@@ -243,6 +247,7 @@ export interface LineaInformeNueva {
   fecha?: string;
   descripcion?: string;
   boleta_agrupador?: string;
+  boleta_numero?: string;
 }
 
 /** Informe Financiero Mensual de una iglesia. */

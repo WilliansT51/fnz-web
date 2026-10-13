@@ -45,6 +45,18 @@ export class InformeFinancieroService {
     return this.http.put<{ data: InformeFinanciero }>(`${this.base}/${id}`, { lineas });
   }
 
+  /** Carga la boleta escaneada (pdf/jpg/png, máx. 5 MB) de una línea con boleta manual. */
+  subirBoleta(informeId: number, lineaId: number, archivo: File): Observable<unknown> {
+    const datos = new FormData();
+    datos.append('archivo', archivo);
+    return this.http.post(`${this.base}/${informeId}/lineas/${lineaId}/boleta`, datos);
+  }
+
+  /** Descarga la boleta escaneada de una línea como Blob. */
+  descargarBoleta(informeId: number, lineaId: number): Observable<Blob> {
+    return this.http.get(`${this.base}/${informeId}/lineas/${lineaId}/boleta`, { responseType: 'blob' });
+  }
+
   /** Aprueba un informe pendiente (aplica sus totales como definitivos). */
   aprobar(id: number, comentario?: string): Observable<{ data: InformeFinanciero }> {
     return this.http.post<{ data: InformeFinanciero }>(`${this.base}/${id}/aprobar`, { comentario });
