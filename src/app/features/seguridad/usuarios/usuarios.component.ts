@@ -180,7 +180,7 @@ const SEVERIDAD_ESTADO: Record<EstadoUsuario, 'success' | 'warn' | 'danger' | 'i
       [header]="edicion() ? 'Editar usuario' : 'Nuevo usuario'"
       [(visible)]="dialogo"
       [modal]="true"
-      [style]="{ width: '32rem' }"
+      [style]="{ width: '36rem', maxWidth: '96vw' }"
       (onHide)="cerrarFormulario()"
     >
       <form class="formulario" [formGroup]="form" (ngSubmit)="guardar()">
@@ -214,6 +214,7 @@ const SEVERIDAD_ESTADO: Record<EstadoUsuario, 'success' | 'warn' | 'danger' | 'i
             <span>Estado</span>
             <p-select
               formControlName="estado"
+              appendTo="body"
               [options]="catalogos()?.estados ?? []"
               optionLabel="etiqueta"
               optionValue="valor"
@@ -224,6 +225,7 @@ const SEVERIDAD_ESTADO: Record<EstadoUsuario, 'success' | 'warn' | 'danger' | 'i
             <span>Roles</span>
             <p-multiselect
               formControlName="roles"
+              appendTo="body"
               [options]="catalogos()?.roles ?? []"
               optionLabel="nombre"
               optionValue="id"
