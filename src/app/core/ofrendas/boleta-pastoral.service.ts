@@ -20,6 +20,19 @@ export class BoletaPastoralService {
   private readonly http = inject(HttpClient);
   private readonly base = `${environment.apiUrl}/ofrendas/boletas-pastorales`;
 
+  /**
+   * Ofrenda asignada al mes: la "Ofrenda Familiar" de los informes mensuales de la iglesia.
+   * @param iglesiaId  iglesia de la boleta.
+   * @param mes        mes 1-12.
+   * @param anio       año.
+   * @param ministroId ministro de la boleta (opcional).
+   */
+  ofrendaAsignada(iglesiaId: number, mes: number, anio: number, ministroId: number | null): Observable<{ data: { ofrenda_asignada: number } }> {
+    let params = new HttpParams().set('iglesia_id', iglesiaId).set('mes', mes).set('anio', anio);
+    if (ministroId) params = params.set('ministro_id', ministroId);
+    return this.http.get<{ data: { ofrenda_asignada: number } }>(`${this.base}/ofrenda-asignada`, { params });
+  }
+
   /** Lista paginada, filtrable por iglesia_id, ministro_id, estado, mes, anio. */
   listar(filtro: Record<string, unknown>): Observable<Paginado<BoletaPastoral>> {
     let params = new HttpParams();

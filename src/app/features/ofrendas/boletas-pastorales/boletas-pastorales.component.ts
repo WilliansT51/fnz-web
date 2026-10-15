@@ -33,8 +33,26 @@ interface FilaNecesidad {
   monto: number | null;
 }
 
+/** Orden de los renglones de necesidades del ministro, igual que la boleta física. */
+const ORDEN_NECESIDADES = [
+  'NEC-ALQUILER',
+  'NEC-AGUA',
+  'NEC-ENERGIA',
+  'NEC-TELEFONO',
+  'NEC-CABLE',
+  'NEC-IMPUESTOS',
+  'NEC-GAS',
+  'NEC-MEDICAMENTOS',
+  'NEC-MIGRATORIOS',
+  'NEC-VIAJE-MAYO',
+  'NEC-VIAJE-AGOSTO',
+  'NEC-VIAJE-SEPTIEMBRE',
+  'NEC-VIAJE-DICIEMBRE',
+  'NEC-VESTUARIO',
+];
+
 /**
- * Boleta Mensual del pastor: ofrenda asignada (fija) + ofrendas para las
+ * Boleta Mensual del pastor: ofrenda asignada (Ofrenda Familiar del informe) + ofrendas para las
  * necesidades básicas del ministro (conceptos de la categoría "Necesidad
  * del ministro"), cada una con su monto.
  */
@@ -170,7 +188,7 @@ interface FilaNecesidad {
             <p-inputNumber formControlName="anio" [useGrouping]="false" fluid />
           </label>
           <label>
-            <span>Ofrenda asignada al mes</span>
+            <span>Ofrenda asignada al mes <small>(Ofrenda Familiar del informe)</small></span>
             <p-inputNumber formControlName="ofrenda_asignada" mode="currency" currency="GTQ" locale="es-GT" [minFractionDigits]="2" fluid />
           </label>
         </div>
@@ -328,6 +346,7 @@ export class BoletasPastoralesComponent implements OnInit {
   readonly resolviendo = signal(false);
   comentarioResolucion = '';
 
+  private claveOfrenda = '';
   private ultimoEvento: TableLazyLoadEvent = { first: 0, rows: 15 };
 
   readonly formCabecera = this.fb.nonNullable.group({
@@ -351,7 +370,10 @@ export class BoletasPastoralesComponent implements OnInit {
   readonly totalGeneral = computed(() => this.ofrendaAsignada() + this.totalNecesidades());
 
   ngOnInit(): void {
+    // La ofrenda asignada la calcula el sistema (Ofrenda Familiar del informe): el campo es de solo lectura.
+    this.formCabecera.controls.ofrenda_asignada.disable();
     this.formCabecera.controls.ofrenda_asignada.valueChanges.subscribe((v) => this.ofrendaAsignada.set(v ?? 0));
+    this.formCabecera.valueChanges.subscribe(() => this.actualizarOfrendaAsignada());
     this.catalogos.todos<Iglesia>('catalogos/eclesiastico/iglesias').subscribe((r) => {
       this.opcionesIglesia.set(r.data.map((i) => ({ label: `${i.nombre} (${i.clave})`, value: i.id })));
     });
@@ -363,9 +385,30 @@ export class BoletasPastoralesComponent implements OnInit {
     this.catalogos.todos<{ id: number; nombre: string }>('catalogos/financiero/categorias-concepto').subscribe((r) => {
       const idNecesidad = r.data.find((c) => c.nombre === 'Necesidad del ministro')?.id;
       this.catalogos.todos<ConceptoMovimiento>('catalogos/financiero/conceptos-movimiento').subscribe((r2) => {
-        const necesidades = r2.data.filter((c) => c.categoria_concepto_id === idNecesidad);
+        // Solo los conceptos activos, en el orden de la boleta física.
+        const necesidades = r2.data
+          .filter((c) => c.categoria_concepto_id === idNecesidad && ORDEN_NECESIDADES.includes(c.codigo))
+          .sort((a, b) => ORDEN_NECESIDADES.indexOf(a.codigo) - ORDEN_NECESIDADES.indexOf(b.codigo));
         this.filasNecesidad.set(necesidades.map((concepto) => ({ concepto, monto: null })));
       });
+    });
+  }
+
+  /**
+   * Consulta la Ofrenda Familiar de los informes de la iglesia/mes/año
+   * elegidos y la fija como ofrenda asignada (0 si no hay iglesia o informe).
+   */
+  private actualizarOfrendaAsignada(): void {
+    const v = this.formCabecera.getRawValue();
+    const clave = `${v.iglesia_id}|${v.ministro_id}|${v.mes}|${v.anio}`;
+    if (clave === this.claveOfrenda) return;
+    this.claveOfrenda = clave;
+    if (!v.iglesia_id || !v.mes || !v.anio) {
+      this.formCabecera.controls.ofrenda_asignada.setValue(0, { emitEvent: true });
+      return;
+    }
+    this.api.ofrendaAsignada(v.iglesia_id, v.mes, v.anio, v.ministro_id).subscribe((r) => {
+      this.formCabecera.controls.ofrenda_asignada.setValue(Number(r.data.ofrenda_asignada), { emitEvent: true });
     });
   }
 
@@ -408,6 +451,7 @@ export class BoletasPastoralesComponent implements OnInit {
 
   abrirCaptura(): void {
     this.errorForm.set([]);
+    this.claveOfrenda = '';
     this.formCabecera.reset({
       iglesia_id: null,
       ministro_id: null,
