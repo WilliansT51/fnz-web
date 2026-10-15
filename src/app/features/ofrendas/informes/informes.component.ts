@@ -398,9 +398,6 @@ const COLECTAS: Renglon[] = [
           <strong>Q {{ totalGeneral() | number: '1.2-2' }}</strong>
         </div>
 
-        @if (faltanDatosBoleta()) {
-          <p class="aviso-error">Los renglones de colecta con boleta física requieren No. de boleta y fecha cuando llevan monto.</p>
-        }
         @if (errorForm().length) {
           <ul class="errores">
             @for (e of errorForm(); track e) { <li>{{ e }}</li> }
@@ -413,7 +410,7 @@ const COLECTAS: Renglon[] = [
             label="Guardar informe"
             type="submit"
             [loading]="guardando()"
-            [disabled]="formCabecera.invalid || guardando() || totalGeneral() === 0 || remanente() < 0 || faltanDatosBoleta()"
+            [disabled]="formCabecera.invalid || guardando() || totalGeneral() === 0 || remanente() < 0"
           />
         </div>
       </form>
@@ -588,15 +585,6 @@ export class InformesComponent implements OnInit {
   readonly totalColectas = computed(() => this.suma(COLECTAS.map((r) => r.codigo)));
   readonly totalGeneral = computed(() => this.totalIngresos() + this.totalColectas());
 
-  /** Hay renglones de colecta con boleta física y monto, pero sin No. de boleta o fecha. */
-  readonly faltanDatosBoleta = computed(() =>
-    COLECTAS.some((r) => {
-      if (!this.requiereBoleta(r.codigo) || (this.monto(r.codigo) ?? 0) <= 0) return false;
-      const b = this.datosBoleta(r.codigo);
-      return !b.numero.trim() || !b.fecha;
-    }),
-  );
-
   ngOnInit(): void {
     this.catalogos.todos<Iglesia>('catalogos/eclesiastico/iglesias').subscribe((r) => {
       this.opcionesIglesia.set(r.data.map((i) => ({ label: `${i.nombre} (${i.clave})`, value: i.id })));
@@ -725,8 +713,8 @@ export class InformesComponent implements OnInit {
         lineas.push({
           concepto_movimiento_id: concepto(codigo).id,
           monto,
-          boleta_numero: b.numero.trim(),
-          fecha: fechaLocalAIso(b.fecha as Date),
+          boleta_numero: b.numero.trim() || undefined,
+          fecha: b.fecha ? fechaLocalAIso(b.fecha) : fechaInforme,
         });
       } else {
         lineas.push({ concepto_movimiento_id: concepto(codigo).id, monto, fecha: fechaInforme });
