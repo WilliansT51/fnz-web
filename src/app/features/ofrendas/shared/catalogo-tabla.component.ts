@@ -156,7 +156,7 @@ import { CampoFormulario, ColumnaTabla, OpcionSelect } from '../../../core/model
                 <textarea pTextarea [formControl]="control(campo.nombre)" rows="3" fluid></textarea>
               }
               @case ('fecha') {
-                <p-datePicker [formControl]="control(campo.nombre)" dateFormat="yy-mm-dd" fluid />
+                <p-datePicker [formControl]="control(campo.nombre)" dateFormat="dd/mm/yy" fluid />
               }
               @case ('checkbox') {
                 <p-checkbox [formControl]="control(campo.nombre)" [binary]="true" />

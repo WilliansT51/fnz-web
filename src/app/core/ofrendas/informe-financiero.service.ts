@@ -30,14 +30,28 @@ export class InformeFinancieroService {
     return this.http.get<{ data: InformeFinanciero }>(`${this.base}/${id}`);
   }
 
-  /** Captura un informe nuevo (nace PENDIENTE). */
+  /**
+   * Captura un informe nuevo (nace PENDIENTE) para un rango de fechas dentro de un mes.
+   * @param iglesiaId   iglesia que reporta.
+   * @param ministroId  ministro del periodo (opcional).
+   * @param fechaInicio inicio del rango, "YYYY-MM-DD".
+   * @param fechaFin    fin del rango, "YYYY-MM-DD" (mismo mes que el inicio).
+   * @param lineas      renglones del informe.
+   */
   crear(
     iglesiaId: number,
-    mes: number,
-    anio: number,
+    ministroId: number | null,
+    fechaInicio: string,
+    fechaFin: string,
     lineas: LineaInformeNueva[],
   ): Observable<{ data: InformeFinanciero }> {
-    return this.http.post<{ data: InformeFinanciero }>(this.base, { iglesia_id: iglesiaId, mes, anio, lineas });
+    return this.http.post<{ data: InformeFinanciero }>(this.base, {
+      iglesia_id: iglesiaId,
+      ministro_id: ministroId,
+      fecha_inicio: fechaInicio,
+      fecha_fin: fechaFin,
+      lineas,
+    });
   }
 
   /** Reemplaza las líneas de un informe PENDIENTE. */

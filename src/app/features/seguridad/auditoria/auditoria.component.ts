@@ -94,14 +94,14 @@ const SEVERIDAD: Record<string, 'success' | 'danger' | 'warn' | 'info' | 'second
       />
       <p-datepicker
         placeholder="Desde"
-        dateFormat="yy-mm-dd"
+        dateFormat="dd/mm/yy"
         [showButtonBar]="true"
         [(ngModel)]="desde"
         (ngModelChange)="aplicar()"
       />
       <p-datepicker
         placeholder="Hasta"
-        dateFormat="yy-mm-dd"
+        dateFormat="dd/mm/yy"
         [showButtonBar]="true"
         [(ngModel)]="hasta"
         (ngModelChange)="aplicar()"

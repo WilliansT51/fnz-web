@@ -24,6 +24,7 @@ import {
   InformeFinanciero,
   InformeFinancieroLinea,
   LineaInformeNueva,
+  Ministro,
   OpcionSelect,
 } from '../../../core/models/ofrendas.models';
 
@@ -162,7 +163,7 @@ const COLECTAS: Renglon[] = [
       <ng-template #body let-i>
         <tr>
           <td>{{ i.iglesia?.nombre }}</td>
-          <td>{{ nombreMes(i.mes) }} {{ i.anio }}</td>
+          <td>{{ periodo(i) }}</td>
           <td>Q {{ i.total_ingresos_ofrenda }}</td>
           <td>Q {{ i.total_colectas }}</td>
           <td>Q {{ i.total_general }}</td>
@@ -225,18 +226,29 @@ const COLECTAS: Renglon[] = [
             />
           </label>
           <label>
-            <span>Mes</span>
-            <p-select formControlName="mes" [options]="opcionesMes" optionLabel="label" optionValue="value" fluid />
-          </label>
-          <label>
-            <span>Año</span>
-            <p-inputNumber formControlName="anio" [useGrouping]="false" fluid />
+            <span>Ministro</span>
+            <p-select
+              formControlName="ministro_id"
+              [options]="opcionesMinistro()"
+              optionLabel="label"
+              optionValue="value"
+              [filter]="true"
+              [showClear]="true"
+              placeholder="Sin especificar"
+              fluid
+            />
           </label>
         </div>
-        <label>
-          <span>Fecha del informe (para los renglones sin boleta)</span>
-          <p-datePicker formControlName="fecha" dateFormat="yy-mm-dd" [style]="{ maxWidth: '14rem' }" />
-        </label>
+        <div class="grid3">
+          <label>
+            <span>Fecha inicio</span>
+            <p-datePicker formControlName="fecha_inicio" dateFormat="dd/mm/yy" fluid />
+          </label>
+          <label>
+            <span>Fecha fin <small>(también es la fecha de los renglones sin boleta)</small></span>
+            <p-datePicker formControlName="fecha_fin" dateFormat="dd/mm/yy" [minDate]="formCabecera.controls.fecha_inicio.value" fluid />
+          </label>
+        </div>
 
         <!-- Parte 1: ingresos y egresos de ofrenda -->
         <div class="bloque">
@@ -355,7 +367,7 @@ const COLECTAS: Renglon[] = [
                   />
                   <p-datePicker
                     placeholder="Fecha"
-                    dateFormat="yy-mm-dd"
+                    dateFormat="dd/mm/yy"
                     [ngModel]="datosBoleta(r.codigo).fecha"
                     (ngModelChange)="setBoleta(r.codigo, 'fecha', $event)"
                     [ngModelOptions]="{ standalone: true }"
@@ -410,7 +422,7 @@ const COLECTAS: Renglon[] = [
     <!-- Diálogo de detalle -->
     <p-dialog header="Detalle del informe" [(visible)]="dialogoDetalle" [modal]="true" [style]="{ width: '46rem', maxWidth: '96vw' }">
       @if (informeActivo(); as i) {
-        <p class="fnz-subtitulo">{{ i.iglesia?.nombre }} — {{ nombreMes(i.mes) }} {{ i.anio }}</p>
+        <p class="fnz-subtitulo">{{ i.iglesia?.nombre }} — {{ periodo(i) }}@if (i.ministro) { — {{ i.ministro.nombre }} {{ i.ministro.apellido }} }</p>
         <table class="tabla-lineas">
           <thead>
             <tr>
@@ -557,10 +569,11 @@ export class InformesComponent implements OnInit {
 
   readonly formCabecera = this.fb.nonNullable.group({
     iglesia_id: [null as number | null, Validators.required],
-    mes: [new Date().getMonth() + 1, Validators.required],
-    anio: [new Date().getFullYear(), Validators.required],
-    fecha: [new Date(), Validators.required],
+    ministro_id: [null as number | null],
+    fecha_inicio: [new Date(), Validators.required],
+    fecha_fin: [new Date(), Validators.required],
   });
+  readonly opcionesMinistro = signal<OpcionSelect[]>([]);
 
   readonly totalIngresos = computed(() => this.suma(INGRESOS.map((r) => r.codigo)));
   readonly diezmo = computed(() => Math.round(this.totalIngresos() * PORCENTAJE_DIEZMO) / 100);
@@ -587,6 +600,9 @@ export class InformesComponent implements OnInit {
   ngOnInit(): void {
     this.catalogos.todos<Iglesia>('catalogos/eclesiastico/iglesias').subscribe((r) => {
       this.opcionesIglesia.set(r.data.map((i) => ({ label: `${i.nombre} (${i.clave})`, value: i.id })));
+    });
+    this.catalogos.todos<Ministro>('catalogos/eclesiastico/ministros').subscribe((r) => {
+      this.opcionesMinistro.set(r.data.map((m) => ({ label: `${m.nombre} ${m.apellido}`, value: m.id })));
     });
     this.catalogos.todos<ConceptoMovimiento>('catalogos/financiero/conceptos-movimiento').subscribe((r) => {
       this.conceptosPorCodigo.set(Object.fromEntries(r.data.map((c) => [c.codigo, c])));
@@ -621,6 +637,15 @@ export class InformesComponent implements OnInit {
   elegirArchivo(codigo: string, evento: Event): void {
     const archivo = (evento.target as HTMLInputElement).files?.[0] ?? null;
     this.setBoleta(codigo, 'archivo', archivo);
+  }
+
+  /**
+   * Texto del periodo de un informe: "dd/mm/yyyy al dd/mm/yyyy".
+   * @param i informe cuyo rango se muestra.
+   */
+  periodo(i: InformeFinanciero): string {
+    const f = (iso: string) => iso.slice(0, 10).split('-').reverse().join('/');
+    return `${f(i.fecha_inicio)} al ${f(i.fecha_fin)}`;
   }
 
   nombreMes(mes: number): string {
@@ -666,9 +691,9 @@ export class InformesComponent implements OnInit {
     this.errorForm.set([]);
     this.formCabecera.reset({
       iglesia_id: null,
-      mes: new Date().getMonth() + 1,
-      anio: new Date().getFullYear(),
-      fecha: new Date(),
+      ministro_id: null,
+      fecha_inicio: new Date(),
+      fecha_fin: new Date(),
     });
     this.montos.set({});
     this.boletas.set({});
@@ -716,9 +741,9 @@ export class InformesComponent implements OnInit {
     this.errorForm.set([]);
 
     const v = this.formCabecera.getRawValue();
-    const lineas = this.armarLineas(fechaLocalAIso(v.fecha));
+    const lineas = this.armarLineas(fechaLocalAIso(v.fecha_fin));
 
-    this.api.crear(v.iglesia_id as number, v.mes, v.anio, lineas).subscribe({
+    this.api.crear(v.iglesia_id as number, v.ministro_id, fechaLocalAIso(v.fecha_inicio), fechaLocalAIso(v.fecha_fin), lineas).subscribe({
       next: (r) => this.subirArchivos(r.data),
       error: (e: HttpErrorResponse) => {
         this.guardando.set(false);

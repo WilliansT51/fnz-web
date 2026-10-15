@@ -204,7 +204,7 @@ import {
           </label>
           <label>
             <span>Fecha de fundación</span>
-            <p-datePicker formControlName="fecha_fundacion" dateFormat="yy-mm-dd" fluid />
+            <p-datePicker formControlName="fecha_fundacion" dateFormat="dd/mm/yy" fluid />
           </label>
         </div>
 
@@ -269,7 +269,7 @@ import {
             </label>
             <label>
               <span>Desde</span>
-              <p-datePicker formControlName="fecha_desde" dateFormat="yy-mm-dd" fluid />
+              <p-datePicker formControlName="fecha_desde" dateFormat="dd/mm/yy" fluid />
             </label>
           </div>
           <label>

@@ -256,6 +256,9 @@ export interface InformeFinanciero {
   iglesia_id: number;
   mes: number;
   anio: number;
+  fecha_inicio: string;
+  fecha_fin: string;
+  ministro_id: number | null;
   estado: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO';
   total_ingresos_ofrenda: string;
   total_egresos_ofrenda: string;
@@ -269,6 +272,7 @@ export interface InformeFinanciero {
   comentario_resolucion: string | null;
   created_at: string;
   iglesia?: { id: number; nombre: string; clave: string };
+  ministro?: { id: number; nombre: string; apellido: string } | null;
   creador?: { id: number; nombre: string; correo: string };
   aprobador?: { id: number; nombre: string; correo: string } | null;
   lineas?: InformeFinancieroLinea[];
