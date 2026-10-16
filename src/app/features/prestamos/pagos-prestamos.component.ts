@@ -109,7 +109,7 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
           <th>Pagado</th>
           <th>Saldo</th>
           <th>Estado</th>
-          <th style="width: 13rem"></th>
+          <th style="width: 7rem"></th>
         </tr>
       </ng-template>
       <ng-template #body let-p>
@@ -321,7 +321,6 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
       .busqueda i { position: absolute; left: 0.75rem; color: var(--fnz-tinta-suave); }
       .busqueda input { width: 100%; padding-left: 2.25rem; }
       .acciones { white-space: nowrap; text-align: right; }
-      .acciones p-button + p-button { margin-left: 0.6rem; }
       .vacio { text-align: center; padding: 2rem; color: var(--fnz-tinta-suave); }
       .grid-pago { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 0.75rem; align-items: end; }
       .grid-pago .archivo { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 0.4rem; }
