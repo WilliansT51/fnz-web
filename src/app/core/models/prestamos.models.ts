@@ -23,6 +23,14 @@ export interface PrestamoPagoAplicacion {
   cuota?: { id: number; numero: number };
 }
 
+/** Documento adjunto (p. ej. la boleta del depósito de un pago). */
+export interface DocumentoAdjunto {
+  id: number;
+  nombre_original: string;
+  mime: string | null;
+  tamano: number;
+}
+
 /** Pago o abono a un préstamo (aplicado o anulado). */
 export interface PrestamoPago {
   id: number;
@@ -34,6 +42,7 @@ export interface PrestamoPago {
   estado: 'APLICADO' | 'ANULADO';
   motivo_anulacion: string | null;
   aplicaciones?: PrestamoPagoAplicacion[];
+  documentos?: DocumentoAdjunto[];
   creador?: { id: number; nombre: string; correo: string };
 }
 
@@ -79,4 +88,6 @@ export interface PagoNuevo {
   monto: number;
   referencia?: string;
   observaciones?: string;
+  /** Boleta del depósito (opcional). */
+  archivo?: File | null;
 }

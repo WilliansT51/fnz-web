@@ -16,7 +16,10 @@ import { MessageService } from 'primeng/api';
 import { TienePermisoDirective } from '../../core/auth/tiene-permiso.directive';
 import { fechaLocalAIso } from '../../core/ofrendas/fecha.util';
 import { PrestamoService } from '../../core/prestamos/prestamo.service';
-import { EstadoPrestamo, Prestamo } from '../../core/models/prestamos.models';
+import { DocumentoAdjunto, EstadoPrestamo, Prestamo } from '../../core/models/prestamos.models';
+
+/** Tamaño máximo por archivo (10 MB), igual que en el backend. */
+const MAX_BYTES = 10 * 1024 * 1024;
 
 const SEVERIDAD_ESTADO: Record<EstadoPrestamo, 'warn' | 'info' | 'success' | 'danger'> = {
   PENDIENTE: 'warn',
@@ -170,6 +173,10 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
                 <input pInputText formControlName="referencia" maxlength="60" />
               </label>
               <p-button label="Registrar" type="submit" [loading]="guardandoPago()" [disabled]="formPago.invalid || guardandoPago()" />
+              <label class="archivo">
+                <span>Boleta del depósito (opcional · PDF, imagen, Word o Excel, máx. 10 MB)</span>
+                <input #archivoInput type="file" [accept]="extensionesPermitidas" (change)="elegirArchivo(archivoInput)" />
+              </label>
             </form>
             @if (errorPago().length) {
               <ul class="errores">
@@ -198,7 +205,7 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
         <p class="fnz-titulo-seccion">Historial de pagos</p>
         @if (p.pagos?.length) {
           <table class="tabla-lineas">
-            <thead><tr><th>Fecha</th><th>Monto</th><th>Referencia</th><th>Se aplicó a</th><th>Estado</th><th></th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Monto</th><th>Referencia</th><th>Se aplicó a</th><th>Estado</th><th>Boleta del depósito</th><th></th></tr></thead>
             <tbody>
               @for (g of p.pagos; track g.id) {
                 <tr [class.anulado]="g.estado === 'ANULADO'">
@@ -213,6 +220,20 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
                   <td>
                     {{ g.estado }}
                     @if (g.motivo_anulacion) { <small>({{ g.motivo_anulacion }})</small> }
+                  </td>
+                  <td>
+                    @for (d of g.documentos; track d.id) {
+                      <a class="enlace-doc" (click)="verDocumento(d)"><i class="pi pi-paperclip"></i> {{ d.nombre_original }}</a>
+                    } @empty {
+                      @if (g.estado === 'APLICADO') {
+                        <label *appTienePermiso="'pagos.pagar'" class="adjuntar">
+                          <i class="pi pi-upload"></i> Adjuntar
+                          <input #adjunto type="file" hidden [accept]="extensionesPermitidas" (change)="adjuntarAPago(g.id, adjunto)" />
+                        </label>
+                      } @else {
+                        —
+                      }
+                    }
                   </td>
                   <td>
                     @if (g.estado === 'APLICADO') {
@@ -263,6 +284,9 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
       .acciones { white-space: nowrap; text-align: right; }
       .vacio { text-align: center; padding: 2rem; color: var(--fnz-tinta-suave); }
       .grid-pago { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 0.75rem; align-items: end; }
+      .grid-pago .archivo { grid-column: 1 / -1; }
+      .enlace-doc, .adjuntar { cursor: pointer; color: var(--p-primary-color, #1d4ed8); font-size: 0.8rem; display: block; }
+      .adjuntar { display: inline-flex; flex-direction: row; gap: 0.3rem; align-items: center; font-weight: 400; }
       label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 500; }
       .resumen { display: grid; gap: 0.4rem; background: var(--fnz-fondo); border-radius: 8px; padding: 0.9rem; font-size: 0.85rem; margin: 0.75rem 0; }
       .resumen div { display: flex; justify-content: space-between; }
@@ -307,6 +331,10 @@ export class PagosPrestamosComponent implements OnInit, OnDestroy {
   private ultimoEvento: TableLazyLoadEvent = { first: 0, rows: 15 };
   private readonly escritura$ = new Subject<void>();
   private suscripcion?: Subscription;
+
+  /** Extensiones aceptadas por el selector de archivos (igual que el backend). */
+  readonly extensionesPermitidas = '.pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx';
+  private archivoDeposito: File | null = null;
 
   readonly formPago = this.fb.nonNullable.group({
     fecha_pago: [new Date(), Validators.required],
@@ -373,9 +401,59 @@ export class PagosPrestamosComponent implements OnInit, OnDestroy {
   abrirPrestamo(p: Prestamo): void {
     this.errorPago.set([]);
     this.formPago.reset({ fecha_pago: new Date(), monto: 0, referencia: '' });
+    this.archivoDeposito = null;
     this.api.obtener(p.id).subscribe((r) => {
       this.activo.set(r.data);
       this.dialogo.set(true);
+    });
+  }
+
+  /**
+   * Toma el archivo elegido para el depósito, validando su tamaño.
+   * @param input control de archivo del formulario de pago.
+   */
+  elegirArchivo(input: HTMLInputElement): void {
+    const archivo = input.files?.[0] ?? null;
+    if (archivo && archivo.size > MAX_BYTES) {
+      this.errorPago.set(['El archivo supera el límite de 10 MB.']);
+      input.value = '';
+      this.archivoDeposito = null;
+      return;
+    }
+    this.errorPago.set([]);
+    this.archivoDeposito = archivo;
+  }
+
+  /**
+   * Adjunta la boleta del depósito a un pago ya registrado.
+   * @param pagoId pago al que se adjunta.
+   * @param input  control de archivo elegido.
+   */
+  adjuntarAPago(pagoId: number, input: HTMLInputElement): void {
+    const p = this.activo();
+    const archivo = input.files?.[0];
+    if (!p || !archivo) return;
+    if (archivo.size > MAX_BYTES) {
+      this.mensajes.add({ severity: 'error', summary: 'El archivo supera el límite de 10 MB' });
+      input.value = '';
+      return;
+    }
+    this.api.adjuntarDocumento(p.id, pagoId, archivo).subscribe({
+      next: () => {
+        this.mensajes.add({ severity: 'success', summary: 'Boleta adjuntada' });
+        this.refrescarActivo();
+      },
+      error: (e: HttpErrorResponse) =>
+        this.mensajes.add({ severity: 'error', summary: this.mensajesDeError(e, 'No se pudo adjuntar el archivo.')[0] }),
+    });
+  }
+
+  /** Descarga y abre en una pestaña el documento adjunto. @param doc documento a ver. */
+  verDocumento(doc: DocumentoAdjunto): void {
+    this.api.descargarDocumento(doc.id).subscribe((blob) => {
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     });
   }
 
@@ -388,11 +466,12 @@ export class PagosPrestamosComponent implements OnInit, OnDestroy {
 
     const v = this.formPago.getRawValue();
     this.api
-      .registrarPago(p.id, { fecha_pago: fechaLocalAIso(v.fecha_pago), monto: v.monto, referencia: v.referencia || undefined })
+      .registrarPago(p.id, { fecha_pago: fechaLocalAIso(v.fecha_pago), monto: v.monto, referencia: v.referencia || undefined, archivo: this.archivoDeposito })
       .subscribe({
         next: () => {
           this.guardandoPago.set(false);
           this.formPago.reset({ fecha_pago: new Date(), monto: 0, referencia: '' });
+          this.archivoDeposito = null;
           this.mensajes.add({ severity: 'success', summary: 'Pago registrado' });
           this.refrescarActivo();
         },

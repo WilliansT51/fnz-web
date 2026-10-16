@@ -47,9 +47,37 @@ export class PrestamoService {
     return this.http.post<{ data: Prestamo }>(`${this.base}/${id}/rechazar`, { comentario });
   }
 
-  /** Registra un pago/abono; se aplica a las cuotas más antiguas. @param id préstamo. @param pago datos del pago. */
+  /**
+   * Registra un pago/abono; se aplica a las cuotas más antiguas. Se envía como
+   * multipart para poder adjuntar la boleta del depósito.
+   * @param id   préstamo.
+   * @param pago datos del pago (y archivo opcional).
+   */
   registrarPago(id: number, pago: PagoNuevo): Observable<{ data: PrestamoPago }> {
-    return this.http.post<{ data: PrestamoPago }>(`${this.base}/${id}/pagos`, pago);
+    const datos = new FormData();
+    datos.append('fecha_pago', pago.fecha_pago);
+    datos.append('monto', String(pago.monto));
+    if (pago.referencia) datos.append('referencia', pago.referencia);
+    if (pago.observaciones) datos.append('observaciones', pago.observaciones);
+    if (pago.archivo) datos.append('archivo', pago.archivo);
+    return this.http.post<{ data: PrestamoPago }>(`${this.base}/${id}/pagos`, datos);
+  }
+
+  /**
+   * Adjunta la boleta del depósito a un pago ya registrado.
+   * @param id      préstamo.
+   * @param pagoId  pago.
+   * @param archivo archivo (pdf, imagen, Word o Excel; máx. 10 MB).
+   */
+  adjuntarDocumento(id: number, pagoId: number, archivo: File): Observable<unknown> {
+    const datos = new FormData();
+    datos.append('archivo', archivo);
+    return this.http.post(`${this.base}/${id}/pagos/${pagoId}/documentos`, datos);
+  }
+
+  /** Descarga un documento adjunto como Blob. @param documentoId id del documento. */
+  descargarDocumento(documentoId: number): Observable<Blob> {
+    return this.http.get(`${environment.apiUrl}/documentos/${documentoId}/descargar`, { responseType: 'blob' });
   }
 
   /** Anula un pago con motivo. @param id préstamo. @param pagoId pago. @param motivo razón de la anulación. */
