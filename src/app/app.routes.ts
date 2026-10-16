@@ -154,6 +154,14 @@ export const routes: Routes = [
         title: 'Boletas mensuales del pastor · FNZ',
       },
       {
+        path: 'prestamos',
+        canActivate: [permisoGuard],
+        data: { permisos: ['prestamos.consultar'] },
+        loadComponent: () =>
+          import('./features/prestamos/prestamos.component').then((m) => m.PrestamosComponent),
+        title: 'Préstamos · FNZ',
+      },
+      {
         path: 'ofrendas/solicitudes',
         canActivate: [permisoGuard],
         data: { permisos: ['solicitudes.consultar'] },
