@@ -142,15 +142,16 @@ const CAMPO_DESTINO: Record<CategoriaGasto, 'jurisdiccion_id' | 'distrito_id' | 
             @if (g.estado === 'APROBADO') {
               <p-button label="Comprobante" icon="pi pi-file-pdf" severity="secondary" [outlined]="true" size="small" (onClick)="descargarComprobante(g)" />
             }
+            <p-button
+              *appTienePermiso="'gastos.editar'"
+              icon="pi pi-pencil"
+              [rounded]="true"
+              [text]="true"
+              size="small"
+              [title]="g.estado === 'PENDIENTE' ? 'Editar' : 'Corregir y reenviar a aprobación'"
+              (onClick)="abrirFormulario(g)"
+            />
             @if (g.estado === 'PENDIENTE') {
-              <p-button
-                *appTienePermiso="'gastos.editar'"
-                icon="pi pi-pencil"
-                [rounded]="true"
-                [text]="true"
-                size="small"
-                (onClick)="abrirFormulario(g)"
-              />
               <p-button
                 *appTienePermiso="'gastos.aprobar'"
                 icon="pi pi-check"
@@ -184,12 +185,23 @@ const CAMPO_DESTINO: Record<CategoriaGasto, 'jurisdiccion_id' | 'distrito_id' | 
 
     <!-- Diálogo de registro / edición -->
     <p-dialog
-      [header]="editandoId() ? 'Editar gasto' : 'Nuevo gasto'"
+      [header]="esCorreccion() ? 'Corregir gasto' : editandoId() ? 'Editar gasto' : 'Nuevo gasto'"
       [(visible)]="dialogoFormulario"
       [modal]="true"
       [style]="{ width: '44rem', maxWidth: '96vw' }"
     >
       <form class="formulario" [formGroup]="form" (ngSubmit)="guardar()">
+        @if (esCorreccion()) {
+          <p class="aviso-correccion">
+            <i class="pi pi-info-circle"></i>
+            Este gasto ya fue {{ estadoOriginal() === 'APROBADO' ? 'aprobado' : 'rechazado' }}. Al guardar la corrección volverá a
+            <strong>Pendiente de aprobación</strong> y deberá aprobarlo otro usuario (distinto de quien lo capturó y de quien lo corrige).
+          </p>
+          <label>
+            <span>Motivo de la corrección</span>
+            <input pInputText formControlName="motivo" maxlength="255" />
+          </label>
+        }
         <div class="grid2">
           <label>
             <span>Categoría del gasto</span>
@@ -267,6 +279,10 @@ const CAMPO_DESTINO: Record<CategoriaGasto, 'jurisdiccion_id' | 'distrito_id' | 
             <dd>{{ g.aprobador.nombre }} {{ g.aprobador.apellido }} · {{ g.fecha_resolucion | date: 'dd/MM/yyyy HH:mm' }}</dd>
           }
           @if (g.comentario_resolucion) { <dt>Comentario</dt><dd>{{ g.comentario_resolucion }}</dd> }
+          @if (g.motivo_correccion) {
+            <dt>Última corrección</dt>
+            <dd>{{ g.motivo_correccion }} · {{ g.fecha_correccion | date: 'dd/MM/yyyy HH:mm' }}</dd>
+          }
         </dl>
         <p class="fnz-titulo-seccion">Razón</p>
         <p class="razon">{{ g.razon }}</p>
@@ -312,6 +328,7 @@ const CAMPO_DESTINO: Record<CategoriaGasto, 'jurisdiccion_id' | 'distrito_id' | 
       .formulario { display: flex; flex-direction: column; gap: 0.9rem; padding-top: 0.5rem; }
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
       label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 500; }
+      .aviso-correccion { margin: 0; padding: 0.6rem 0.8rem; border-radius: 8px; background: #fff7e6; color: #7a4b00; font-size: 0.82rem; }
       .contador { font-weight: 400; color: var(--fnz-tinta-suave); align-self: flex-end; }
       .contador.limite { color: #c0392b; font-weight: 600; }
       .errores { margin: 0; padding-left: 1.1rem; color: #c0392b; font-size: 0.82rem; }
@@ -386,7 +403,13 @@ export class GastosComponent implements OnInit, OnDestroy {
     monto: [null as number | null, [Validators.required, Validators.min(0.01)]],
     fecha_egreso: [null as Date | null, Validators.required],
     razon: ['', [Validators.required, Validators.maxLength(MAX_RAZON)]],
+    motivo: [''],
   });
+
+  /** Estado que tenía el gasto que se corrige (null en un alta o al editar un pendiente). */
+  readonly estadoOriginal = signal<EstadoGasto | null>(null);
+  /** True cuando se edita un gasto ya resuelto: pide motivo y lo reenvía a aprobación. */
+  readonly esCorreccion = computed(() => this.estadoOriginal() !== null && this.estadoOriginal() !== 'PENDIENTE');
 
   /**
    * Espejo en señal de los valores del formulario: los `computed` no reaccionan
@@ -483,9 +506,15 @@ export class GastosComponent implements OnInit, OnDestroy {
   abrirFormulario(gasto?: Gasto): void {
     this.errorForm.set([]);
     this.editandoId.set(gasto?.id ?? null);
+    this.estadoOriginal.set(gasto?.estado ?? null);
+    // El motivo solo es obligatorio al corregir un gasto ya resuelto.
+    const motivo = this.form.controls.motivo;
+    motivo.setValidators(gasto && gasto.estado !== 'PENDIENTE' ? [Validators.required] : []);
+    motivo.updateValueAndValidity();
 
     if (gasto) {
       this.form.reset({
+        motivo: '',
         categoria: gasto.categoria,
         gasto_tipo_id: gasto.gasto_tipo_id,
         destino_id: gasto[CAMPO_DESTINO[gasto.categoria]],
@@ -496,7 +525,7 @@ export class GastosComponent implements OnInit, OnDestroy {
       // Reaplicar el destino: cambiar la categoría lo limpia vía valueChanges.
       this.form.controls.destino_id.setValue(gasto[CAMPO_DESTINO[gasto.categoria]]);
     } else {
-      this.form.reset({ categoria: null, gasto_tipo_id: null, destino_id: null, monto: null, fecha_egreso: new Date(), razon: '' });
+      this.form.reset({ categoria: null, gasto_tipo_id: null, destino_id: null, monto: null, fecha_egreso: new Date(), razon: '', motivo: '' });
     }
     this.dialogoFormulario.set(true);
   }
@@ -523,12 +552,16 @@ export class GastosComponent implements OnInit, OnDestroy {
     };
 
     const id = this.editandoId();
-    const peticion = id ? this.api.actualizar(id, datos) : this.api.crear(datos);
+    const correccion = this.esCorreccion();
+    const peticion = id ? this.api.actualizar(id, datos, correccion ? (v.motivo ?? '').trim() : undefined) : this.api.crear(datos);
     peticion.subscribe({
       next: (r) => {
         this.guardando.set(false);
         this.dialogoFormulario.set(false);
-        this.mensajes.add({ severity: 'success', summary: id ? 'Gasto actualizado' : `Gasto ${r.data.codigo} registrado, pendiente de aprobación` });
+        this.mensajes.add({
+          severity: 'success',
+          summary: correccion ? 'Corrección guardada: el gasto quedó pendiente de aprobación' : id ? 'Gasto actualizado' : `Gasto ${r.data.codigo} registrado, pendiente de aprobación`,
+        });
         this.recargar();
       },
       error: (e: HttpErrorResponse) => {

@@ -31,6 +31,9 @@ export interface Gasto {
   aprobador_id: number | null;
   fecha_resolucion: string | null;
   comentario_resolucion: string | null;
+  corregido_por: number | null;
+  motivo_correccion: string | null;
+  fecha_correccion: string | null;
   tipo?: { id: number; nombre: string };
   creador?: { id: number; nombre: string; apellido: string; correo: string };
   aprobador?: { id: number; nombre: string; apellido: string; correo: string } | null;

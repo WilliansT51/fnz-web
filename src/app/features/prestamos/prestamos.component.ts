@@ -15,7 +15,7 @@ import { MessageService } from 'primeng/api';
 import { AuthService } from '../../core/auth/auth.service';
 import { TienePermisoDirective } from '../../core/auth/tiene-permiso.directive';
 import { CatalogoService } from '../../core/ofrendas/catalogo.service';
-import { fechaLocalAIso } from '../../core/ofrendas/fecha.util';
+import { fechaLocalAIso, isoAFechaLocal } from '../../core/ofrendas/fecha.util';
 import { PrestamoService } from '../../core/prestamos/prestamo.service';
 import { Iglesia, Ministro, OpcionSelect } from '../../core/models/ofrendas.models';
 import { EstadoPrestamo, Prestamo } from '../../core/models/prestamos.models';
@@ -119,6 +119,17 @@ interface CuotaPrevia {
           <td><p-tag [value]="p.estado" [severity]="severidad(p.estado)" /></td>
           <td class="acciones">
             <p-button icon="pi pi-eye" [rounded]="true" [text]="true" size="small" (onClick)="verDetalle(p)" />
+            @if (p.estado !== 'PAGADO') {
+              <p-button
+                *appTienePermiso="'prestamos.editar'"
+                icon="pi pi-pencil"
+                [rounded]="true"
+                [text]="true"
+                size="small"
+                [title]="p.estado === 'PENDIENTE' ? 'Editar' : 'Corregir y reenviar a aprobación'"
+                (onClick)="abrirEdicion(p)"
+              />
+            }
             @if (p.estado === 'ACTIVO' || p.estado === 'PAGADO') {
               <p-button
                 label="Comprobante"
@@ -162,8 +173,24 @@ interface CuotaPrevia {
     </p-table>
 
     <!-- Diálogo de captura -->
-    <p-dialog header="Nuevo préstamo" [(visible)]="dialogoCaptura" [modal]="true" [style]="{ width: '46rem', maxWidth: '96vw' }">
+    <p-dialog
+      [header]="esCorreccion() ? 'Corregir préstamo' : editandoId() ? 'Editar préstamo' : 'Nuevo préstamo'"
+      [(visible)]="dialogoCaptura"
+      [modal]="true"
+      [style]="{ width: '46rem', maxWidth: '96vw' }"
+    >
       <form class="formulario" [formGroup]="formPrestamo" (ngSubmit)="guardarPrestamo()">
+        @if (esCorreccion()) {
+          <p class="aviso-correccion">
+            <i class="pi pi-info-circle"></i>
+            Este préstamo ya fue {{ estadoOriginal() === 'RECHAZADO' ? 'rechazado' : 'aprobado' }}. Al guardar la corrección se regenera su tabla de pagos y volverá a
+            <strong>Pendiente</strong>: deberá aprobarlo otro usuario (distinto de quien lo capturó y de quien lo corrige). No se puede corregir si ya tiene pagos.
+          </p>
+          <label>
+            <span>Motivo de la corrección</span>
+            <input pInputText formControlName="motivo" maxlength="255" />
+          </label>
+        }
         <div class="grid2">
           <label>
             <span>Tipo de deudor</span>
@@ -355,6 +382,7 @@ interface CuotaPrevia {
       .tabla-lineas .anulado { color: var(--fnz-tinta-suave); text-decoration: line-through; }
       .scroll-tabla { max-height: 14rem; overflow: auto; }
       .cabecera-detalle p { margin: 0.25rem 0; }
+      .aviso-correccion { margin: 0; padding: 0.6rem 0.8rem; border-radius: 8px; background: #fff7e6; color: #7a4b00; font-size: 0.82rem; }
       .titulo-detalle { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
       .acciones p-button + p-button { margin-left: 0.4rem; }
     `,
@@ -407,7 +435,14 @@ export class PrestamosComponent implements OnInit {
     fecha_desembolso: [new Date(), Validators.required],
     fecha_primera_cuota: [new Date(), Validators.required],
     observaciones: [''],
+    motivo: [''],
   });
+
+  /** Préstamo que se edita (null en un alta) y el estado que tenía, para saber si es una corrección. */
+  readonly editandoId = signal<number | null>(null);
+  readonly estadoOriginal = signal<EstadoPrestamo | null>(null);
+  /** True al editar un préstamo ya resuelto: pide motivo y lo reenvía a aprobación. */
+  readonly esCorreccion = computed(() => this.estadoOriginal() !== null && this.estadoOriginal() !== 'PENDIENTE');
 
   /**
    * Espejo en señal de los valores del formulario: los `computed` no
@@ -496,6 +531,9 @@ export class PrestamosComponent implements OnInit {
 
   abrirCaptura(): void {
     this.errorForm.set([]);
+    this.editandoId.set(null);
+    this.estadoOriginal.set(null);
+    this.ajustarMotivo(false);
     this.formPrestamo.reset({
       tipo: 'IGLESIA',
       deudor_id: null,
@@ -504,8 +542,44 @@ export class PrestamosComponent implements OnInit {
       fecha_desembolso: new Date(),
       fecha_primera_cuota: new Date(),
       observaciones: '',
+      motivo: '',
     });
     this.dialogoCaptura.set(true);
+  }
+
+  /**
+   * Abre el formulario con los datos de un préstamo para editarlo (si está pendiente)
+   * o corregirlo (si ya estaba aprobado o rechazado).
+   * @param p préstamo de la lista.
+   */
+  abrirEdicion(p: Prestamo): void {
+    this.errorForm.set([]);
+    this.editandoId.set(p.id);
+    this.estadoOriginal.set(p.estado);
+    this.ajustarMotivo(p.estado !== 'PENDIENTE');
+
+    const tipo = p.iglesia_id ? 'IGLESIA' : 'MINISTRO';
+    const deudor = p.iglesia_id ?? p.ministro_id;
+    this.formPrestamo.reset({
+      tipo,
+      deudor_id: deudor,
+      monto: Number(p.monto),
+      plazo_meses: p.plazo_meses,
+      fecha_desembolso: isoAFechaLocal(p.fecha_desembolso),
+      fecha_primera_cuota: isoAFechaLocal(p.fecha_primera_cuota),
+      observaciones: p.observaciones ?? '',
+      motivo: '',
+    });
+    // Cambiar el tipo limpia el deudor (valueChanges): se vuelve a fijar.
+    this.formPrestamo.controls.deudor_id.setValue(deudor);
+    this.dialogoCaptura.set(true);
+  }
+
+  /** El motivo solo es obligatorio al corregir un préstamo ya resuelto. @param obligatorio si es una corrección. */
+  private ajustarMotivo(obligatorio: boolean): void {
+    const motivo = this.formPrestamo.controls.motivo;
+    motivo.setValidators(obligatorio ? [Validators.required] : []);
+    motivo.updateValueAndValidity();
   }
 
   guardarPrestamo(): void {
@@ -514,21 +588,29 @@ export class PrestamosComponent implements OnInit {
     this.errorForm.set([]);
 
     const v = this.formPrestamo.getRawValue();
-    this.api
-      .crear({
-        iglesia_id: v.tipo === 'IGLESIA' ? v.deudor_id : null,
-        ministro_id: v.tipo === 'MINISTRO' ? v.deudor_id : null,
-        monto: v.monto,
-        plazo_meses: v.plazo_meses,
-        fecha_desembolso: fechaLocalAIso(v.fecha_desembolso),
-        fecha_primera_cuota: fechaLocalAIso(v.fecha_primera_cuota),
-        observaciones: v.observaciones || undefined,
-      })
+    const datos = {
+      iglesia_id: v.tipo === 'IGLESIA' ? v.deudor_id : null,
+      ministro_id: v.tipo === 'MINISTRO' ? v.deudor_id : null,
+      monto: v.monto,
+      plazo_meses: v.plazo_meses,
+      fecha_desembolso: fechaLocalAIso(v.fecha_desembolso),
+      fecha_primera_cuota: fechaLocalAIso(v.fecha_primera_cuota),
+      observaciones: v.observaciones || undefined,
+    };
+    const id = this.editandoId();
+    const correccion = this.esCorreccion();
+
+    (id ? this.api.actualizar(id, datos, correccion ? v.motivo.trim() : undefined) : this.api.crear(datos))
       .subscribe({
         next: (r) => {
           this.guardando.set(false);
           this.dialogoCaptura.set(false);
-          this.mensajes.add({ severity: 'success', summary: `Préstamo ${r.data.codigo} creado, pendiente de aprobación` });
+          this.mensajes.add({
+            severity: 'success',
+            summary: correccion
+              ? 'Corrección guardada: el préstamo quedó pendiente de aprobación'
+              : id ? 'Préstamo actualizado' : `Préstamo ${r.data.codigo} creado, pendiente de aprobación`,
+          });
           this.recargar();
         },
         error: (e: HttpErrorResponse) => {

@@ -37,9 +37,15 @@ export class GastoService {
     return this.http.post<{ data: Gasto }>(this.base, datos);
   }
 
-  /** Modifica un gasto pendiente. @param id gasto. @param datos formulario. */
-  actualizar(id: number, datos: GastoNuevo): Observable<{ data: Gasto }> {
-    return this.http.put<{ data: Gasto }>(`${this.base}/${id}`, datos);
+  /**
+   * Modifica un gasto. Si ya estaba aprobado o rechazado es una corrección: lleva
+   * el motivo y el gasto vuelve a pendiente de aprobación.
+   * @param id     gasto.
+   * @param datos  formulario.
+   * @param motivo motivo de la corrección (solo cuando el gasto ya estaba resuelto).
+   */
+  actualizar(id: number, datos: GastoNuevo, motivo?: string): Observable<{ data: Gasto }> {
+    return this.http.put<{ data: Gasto }>(`${this.base}/${id}`, motivo ? { ...datos, motivo } : datos);
   }
 
   /** Aprueba un gasto pendiente. @param id gasto. @param comentario opcional. */

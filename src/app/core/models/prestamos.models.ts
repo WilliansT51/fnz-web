@@ -63,6 +63,9 @@ export interface Prestamo {
   creado_por: number;
   aprobador_id: number | null;
   comentario_resolucion: string | null;
+  corregido_por: number | null;
+  motivo_correccion: string | null;
+  fecha_correccion: string | null;
   iglesia?: { id: number; nombre: string; clave: string } | null;
   ministro?: { id: number; nombre: string; apellido: string } | null;
   creador?: { id: number; nombre: string; correo: string };

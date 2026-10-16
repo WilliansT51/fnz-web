@@ -270,6 +270,9 @@ export interface InformeFinanciero {
   aprobador_id: number | null;
   fecha_resolucion: string | null;
   comentario_resolucion: string | null;
+  corregido_por: number | null;
+  motivo_correccion: string | null;
+  fecha_correccion: string | null;
   created_at: string;
   iglesia?: { id: number; nombre: string; clave: string };
   ministro?: { id: number; nombre: string; apellido: string } | null;
@@ -302,6 +305,9 @@ export interface BoletaPastoral {
   aprobador_id: number | null;
   fecha_resolucion: string | null;
   comentario_resolucion: string | null;
+  corregido_por: number | null;
+  motivo_correccion: string | null;
+  fecha_correccion: string | null;
   created_at: string;
   iglesia?: { id: number; nombre: string; clave: string };
   ministro?: { id: number; nombre: string; apellido: string };

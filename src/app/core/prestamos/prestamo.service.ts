@@ -37,6 +37,17 @@ export class PrestamoService {
     return this.http.post<{ data: Prestamo }>(this.base, datos);
   }
 
+  /**
+   * Modifica un préstamo y regenera su tabla de cuotas. Si ya estaba aprobado o rechazado es
+   * una corrección: lleva el motivo y el préstamo vuelve a pendiente. No procede si ya tiene pagos.
+   * @param id     préstamo.
+   * @param datos  formulario.
+   * @param motivo motivo de la corrección (solo cuando ya estaba resuelto).
+   */
+  actualizar(id: number, datos: PrestamoNuevo, motivo?: string): Observable<{ data: Prestamo }> {
+    return this.http.put<{ data: Prestamo }>(`${this.base}/${id}`, motivo ? { ...datos, motivo } : datos);
+  }
+
   /** Descarga el comprobante de pago con cheque (PDF) de un préstamo aprobado. @param id préstamo. */
   comprobante(id: number): Observable<Blob> {
     return this.http.get(`${this.base}/${id}/comprobante`, { responseType: 'blob' });
