@@ -37,6 +37,11 @@ export class PrestamoService {
     return this.http.post<{ data: Prestamo }>(this.base, datos);
   }
 
+  /** Descarga el comprobante de pago con cheque (PDF) de un préstamo aprobado. @param id préstamo. */
+  comprobante(id: number): Observable<Blob> {
+    return this.http.get(`${this.base}/${id}/comprobante`, { responseType: 'blob' });
+  }
+
   /** Aprueba (desembolsa) un préstamo pendiente. @param id préstamo. @param comentario opcional. */
   aprobar(id: number, comentario?: string): Observable<{ data: Prestamo }> {
     return this.http.post<{ data: Prestamo }>(`${this.base}/${id}/aprobar`, { comentario });

@@ -105,7 +105,7 @@ interface CuotaPrevia {
           <th>Pagado</th>
           <th>Saldo</th>
           <th>Estado</th>
-          <th style="width: 9rem"></th>
+          <th style="width: 15rem"></th>
         </tr>
       </ng-template>
       <ng-template #body let-p>
@@ -119,6 +119,16 @@ interface CuotaPrevia {
           <td><p-tag [value]="p.estado" [severity]="severidad(p.estado)" /></td>
           <td class="acciones">
             <p-button icon="pi pi-eye" [rounded]="true" [text]="true" size="small" (onClick)="verDetalle(p)" />
+            @if (p.estado === 'ACTIVO' || p.estado === 'PAGADO') {
+              <p-button
+                label="Comprobante"
+                icon="pi pi-file-pdf"
+                severity="secondary"
+                [outlined]="true"
+                size="small"
+                (onClick)="descargarComprobante(p)"
+              />
+            }
             @if (p.estado === 'PENDIENTE') {
               <p-button
                 *appTienePermiso="'prestamos.aprobar'"
@@ -228,9 +238,21 @@ interface CuotaPrevia {
     <p-dialog header="Detalle del préstamo" [(visible)]="dialogoDetalle" [modal]="true" [style]="{ width: '56rem', maxWidth: '96vw' }">
       @if (activo(); as p) {
         <div class="cabecera-detalle">
-          <div>
-            <strong>{{ p.codigo }}</strong> — {{ deudor(p) }}
-            <p-tag [value]="p.estado" [severity]="severidad(p.estado)" />
+          <div class="titulo-detalle">
+            <span>
+              <strong>{{ p.codigo }}</strong> — {{ deudor(p) }}
+              <p-tag [value]="p.estado" [severity]="severidad(p.estado)" />
+            </span>
+            @if (p.estado === 'ACTIVO' || p.estado === 'PAGADO') {
+              <p-button
+                label="Generar comprobante"
+                icon="pi pi-file-pdf"
+                severity="secondary"
+                [outlined]="true"
+                size="small"
+                (onClick)="descargarComprobante(p)"
+              />
+            }
           </div>
           <p class="fnz-subtitulo">
             Desembolso {{ p.fecha_desembolso | date: 'dd/MM/yyyy' : 'UTC' }} · {{ p.plazo_meses }} cuotas mensuales · Capturado por {{ p.creador?.nombre }}
@@ -333,6 +355,8 @@ interface CuotaPrevia {
       .tabla-lineas .anulado { color: var(--fnz-tinta-suave); text-decoration: line-through; }
       .scroll-tabla { max-height: 14rem; overflow: auto; }
       .cabecera-detalle p { margin: 0.25rem 0; }
+      .titulo-detalle { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+      .acciones p-button + p-button { margin-left: 0.4rem; }
     `,
   ],
 })
@@ -512,6 +536,22 @@ export class PrestamosComponent implements OnInit {
           this.errorForm.set(this.mensajesDeError(e, 'No se pudo guardar el préstamo.'));
         },
       });
+  }
+
+  /**
+   * Genera el "Comprobante de pago con cheque" (PDF) de un préstamo aprobado y
+   * lo abre en una pestaña nueva.
+   * @param p préstamo ACTIVO o PAGADO.
+   */
+  descargarComprobante(p: Prestamo): void {
+    this.api.comprobante(p.id).subscribe({
+      next: (pdf) => {
+        const url = URL.createObjectURL(new Blob([pdf], { type: 'application/pdf' }));
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      },
+      error: () => this.mensajes.add({ severity: 'error', summary: 'No se pudo generar el comprobante' }),
+    });
   }
 
   /** Abre el detalle (cuotas, pagos) consultando el préstamo completo. @param p préstamo de la lista. */
