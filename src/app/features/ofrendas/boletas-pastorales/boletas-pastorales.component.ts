@@ -133,6 +133,15 @@ const ORDEN_NECESIDADES = [
           <td><p-tag [value]="b.estado" [severity]="severidad(b.estado)" /></td>
           <td class="acciones">
             <p-button icon="pi pi-eye" [rounded]="true" [text]="true" size="small" (onClick)="verDetalle(b)" />
+            <p-button
+              *appTienePermiso="'boletas-pastorales.editar'"
+              icon="pi pi-pencil"
+              [rounded]="true"
+              [text]="true"
+              size="small"
+              [title]="b.estado === 'PENDIENTE' ? 'Editar' : 'Corregir y reenviar a aprobación'"
+              (onClick)="abrirEdicion(b)"
+            />
             @if (b.estado === 'PENDIENTE') {
               <p-button
                 *appTienePermiso="'boletas-pastorales.aprobar'"
@@ -166,8 +175,24 @@ const ORDEN_NECESIDADES = [
     </p-table>
 
     <!-- Diálogo de captura -->
-    <p-dialog header="Nueva boleta mensual del pastor" [(visible)]="dialogoCaptura" [modal]="true" [style]="{ width: '46rem' }">
+    <p-dialog
+      [header]="esCorreccion() ? 'Corregir boleta mensual del pastor' : editandoId() ? 'Editar boleta mensual del pastor' : 'Nueva boleta mensual del pastor'"
+      [(visible)]="dialogoCaptura"
+      [modal]="true"
+      [style]="{ width: '46rem', maxWidth: '96vw' }"
+    >
       <form class="formulario" [formGroup]="formCabecera" (ngSubmit)="guardarBoleta()">
+        @if (esCorreccion()) {
+          <p class="aviso-correccion">
+            <i class="pi pi-info-circle"></i>
+            Esta boleta ya fue {{ estadoOriginal() === 'APROBADO' ? 'aprobada' : 'rechazada' }}. Al guardar la corrección volverá a
+            <strong>Pendiente</strong>: deberá aprobarla otro usuario (distinto de quien la capturó y de quien la corrige).
+          </p>
+          <label>
+            <span>Motivo de la corrección</span>
+            <input pInputText formControlName="motivo" maxlength="255" />
+          </label>
+        }
         <div class="grid2">
           <label>
             <span>Iglesia</span>
@@ -285,6 +310,7 @@ const ORDEN_NECESIDADES = [
   `,
   styles: [
     `
+      .aviso-correccion { margin: 0; padding: 0.6rem 0.8rem; border-radius: 8px; background: #fff7e6; color: #7a4b00; font-size: 0.82rem; }
       .filtros { display: flex; gap: 0.75rem; margin-bottom: 0.75rem; }
       .acciones { white-space: nowrap; text-align: right; }
       .vacio { text-align: center; padding: 2rem; color: var(--fnz-tinta-suave); }
@@ -355,7 +381,14 @@ export class BoletasPastoralesComponent implements OnInit {
     mes: [new Date().getMonth() + 1, Validators.required],
     anio: [new Date().getFullYear(), Validators.required],
     ofrenda_asignada: [0, [Validators.required, Validators.min(0)]],
+    motivo: [''],
   });
+
+  /** Boleta que se edita (null en un alta) y el estado que tenía, para saber si es una corrección. */
+  readonly editandoId = signal<number | null>(null);
+  readonly estadoOriginal = signal<BoletaPastoral['estado'] | null>(null);
+  /** True al editar una boleta ya resuelta: pide motivo y la reenvía a aprobación. */
+  readonly esCorreccion = computed(() => this.estadoOriginal() !== null && this.estadoOriginal() !== 'PENDIENTE');
 
   /**
    * Espejo en señal del control reactivo `ofrenda_asignada`: los
@@ -452,15 +485,61 @@ export class BoletasPastoralesComponent implements OnInit {
   abrirCaptura(): void {
     this.errorForm.set([]);
     this.claveOfrenda = '';
+    this.editandoId.set(null);
+    this.estadoOriginal.set(null);
+    this.prepararCabecera(false, false);
     this.formCabecera.reset({
       iglesia_id: null,
       ministro_id: null,
       mes: new Date().getMonth() + 1,
       anio: new Date().getFullYear(),
       ofrenda_asignada: 0,
+      motivo: '',
     });
     this.filasNecesidad.update((filas) => filas.map((f) => ({ ...f, monto: null })));
     this.dialogoCaptura.set(true);
+  }
+
+  /**
+   * Abre el formulario con los datos de una boleta para editarla (si está pendiente)
+   * o corregirla (si ya estaba aprobada o rechazada). Iglesia, pastor y periodo no cambian.
+   * @param boleta boleta de la lista.
+   */
+  abrirEdicion(boleta: BoletaPastoral): void {
+    this.api.obtener(boleta.id).subscribe((r) => {
+      const b = r.data;
+      this.errorForm.set([]);
+      this.claveOfrenda = '';
+      this.editandoId.set(b.id);
+      this.estadoOriginal.set(b.estado);
+      this.prepararCabecera(true, b.estado !== 'PENDIENTE');
+      this.formCabecera.reset({
+        iglesia_id: b.iglesia_id,
+        ministro_id: b.ministro_id,
+        mes: b.mes,
+        anio: b.anio,
+        ofrenda_asignada: Number(b.ofrenda_asignada),
+        motivo: '',
+      });
+      const montos = new Map((b.lineas ?? []).map((l) => [l.concepto_movimiento_id, Number(l.monto)]));
+      this.filasNecesidad.update((filas) => filas.map((f) => ({ ...f, monto: montos.get(f.concepto.id) ?? null })));
+      this.dialogoCaptura.set(true);
+    });
+  }
+
+  /**
+   * Deja el formulario listo para un alta, una edición o una corrección.
+   * @param edicion      true si se edita una boleta existente (iglesia, pastor y periodo quedan fijos).
+   * @param obligaMotivo true si es una corrección (el motivo es obligatorio).
+   */
+  private prepararCabecera(edicion: boolean, obligaMotivo: boolean): void {
+    const c = this.formCabecera.controls;
+    for (const control of [c.iglesia_id, c.ministro_id, c.mes, c.anio]) {
+      if (edicion) control.disable({ emitEvent: false });
+      else control.enable({ emitEvent: false });
+    }
+    c.motivo.setValidators(obligaMotivo ? [Validators.required] : []);
+    c.motivo.updateValueAndValidity({ emitEvent: false });
   }
 
   guardarBoleta(): void {
@@ -473,11 +552,20 @@ export class BoletasPastoralesComponent implements OnInit {
       .filter((f) => f.monto && f.monto > 0)
       .map((f) => ({ concepto_movimiento_id: f.concepto.id, monto: f.monto as number }));
 
-    this.api.crear(v.iglesia_id as number, v.ministro_id as number, v.mes, v.anio, v.ofrenda_asignada, lineas).subscribe({
+    const id = this.editandoId();
+    const correccion = this.esCorreccion();
+    const peticion = id
+      ? this.api.actualizar(id, v.ofrenda_asignada, lineas, correccion ? v.motivo.trim() : undefined)
+      : this.api.crear(v.iglesia_id as number, v.ministro_id as number, v.mes, v.anio, v.ofrenda_asignada, lineas);
+
+    peticion.subscribe({
       next: () => {
         this.guardando.set(false);
         this.dialogoCaptura.set(false);
-        this.mensajes.add({ severity: 'success', summary: 'Boleta creada, queda pendiente de aprobación' });
+        this.mensajes.add({
+          severity: 'success',
+          summary: correccion ? 'Corrección guardada: la boleta quedó pendiente de aprobación' : id ? 'Boleta actualizada' : 'Boleta creada, queda pendiente de aprobación',
+        });
         this.recargar();
       },
       error: (e: HttpErrorResponse) => {

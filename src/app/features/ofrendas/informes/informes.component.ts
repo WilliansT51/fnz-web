@@ -17,7 +17,7 @@ import { AuthService } from '../../../core/auth/auth.service';
 import { TienePermisoDirective } from '../../../core/auth/tiene-permiso.directive';
 import { CatalogoService } from '../../../core/ofrendas/catalogo.service';
 import { InformeFinancieroService } from '../../../core/ofrendas/informe-financiero.service';
-import { fechaLocalAIso } from '../../../core/ofrendas/fecha.util';
+import { fechaLocalAIso, isoAFechaLocal } from '../../../core/ofrendas/fecha.util';
 import {
   ConceptoMovimiento,
   Iglesia,
@@ -54,6 +54,8 @@ interface DatosBoleta {
   numero: string;
   fecha: Date | null;
   archivo: File | null;
+  /** Nombre de la boleta ya guardada (al corregir un informe); se conserva si no se elige otra. */
+  archivoActual?: string | null;
 }
 
 /** Ingresos por ofrenda (columna izquierda del formulario original). */
@@ -173,6 +175,15 @@ const COLECTAS: Renglon[] = [
           <td><p-tag [value]="i.estado" [severity]="severidad(i.estado)" /></td>
           <td class="acciones">
             <p-button icon="pi pi-eye" [rounded]="true" [text]="true" size="small" (onClick)="verDetalle(i)" />
+            <p-button
+              *appTienePermiso="'informes.editar'"
+              icon="pi pi-pencil"
+              [rounded]="true"
+              [text]="true"
+              size="small"
+              [title]="i.estado === 'PENDIENTE' ? 'Editar' : 'Corregir y reenviar a aprobación'"
+              (onClick)="abrirEdicion(i)"
+            />
             @if (i.estado === 'PENDIENTE') {
               <p-button
                 *appTienePermiso="'informes.aprobar'"
@@ -207,12 +218,23 @@ const COLECTAS: Renglon[] = [
 
     <!-- Diálogo de captura -->
     <p-dialog
-      header="Nuevo informe financiero mensual"
+      [header]="esCorreccion() ? 'Corregir informe financiero mensual' : editandoId() ? 'Editar informe financiero mensual' : 'Nuevo informe financiero mensual'"
       [(visible)]="dialogoCaptura"
       [modal]="true"
       [style]="{ width: '62rem', maxWidth: '96vw' }"
     >
       <form class="formulario" [formGroup]="formCabecera" (ngSubmit)="guardarInforme()">
+        @if (esCorreccion()) {
+          <p class="aviso-correccion">
+            <i class="pi pi-info-circle"></i>
+            Este informe ya fue {{ estadoOriginal() === 'APROBADO' ? 'aprobado' : 'rechazado' }}. Al guardar la corrección volverá a
+            <strong>Pendiente</strong>: deberá aprobarlo otro usuario (distinto de quien lo capturó y de quien lo corrige). Las boletas escaneadas ya cargadas se conservan.
+          </p>
+          <label>
+            <span>Motivo de la corrección</span>
+            <input pInputText formControlName="motivo" maxlength="255" />
+          </label>
+        }
         <div class="grid3">
           <label>
             <span>Iglesia</span>
@@ -375,7 +397,7 @@ const COLECTAS: Renglon[] = [
                   />
                   <label class="subir">
                     <i class="pi pi-upload"></i>
-                    <span>{{ datosBoleta(r.codigo).archivo?.name ?? 'Cargar boleta (máx. 10 MB)' }}</span>
+                    <span>{{ datosBoleta(r.codigo).archivo?.name ?? datosBoleta(r.codigo).archivoActual ?? 'Cargar boleta (máx. 10 MB)' }}</span>
                     <input
                       type="file"
                       accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
@@ -511,6 +533,7 @@ const COLECTAS: Renglon[] = [
       }
       .total-general small { font-weight: 400; color: var(--fnz-tinta-suave); }
       .total-general strong { font-size: 1.05rem; padding-right: 0.75rem; }
+      .aviso-correccion { margin: 0; padding: 0.6rem 0.8rem; border-radius: 8px; background: #fff7e6; color: #7a4b00; font-size: 0.82rem; }
       .aviso-error { margin: 0; color: #c0392b; font-size: 0.82rem; }
       .errores { margin: 0; padding-left: 1.1rem; color: #c0392b; font-size: 0.82rem; }
       .pie { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
@@ -569,8 +592,15 @@ export class InformesComponent implements OnInit {
     ministro_id: [null as number | null],
     fecha_inicio: [new Date(), Validators.required],
     fecha_fin: [new Date(), Validators.required],
+    motivo: [''],
   });
   readonly opcionesMinistro = signal<OpcionSelect[]>([]);
+
+  /** Informe que se edita (null en un alta) y el estado que tenía, para saber si es una corrección. */
+  readonly editandoId = signal<number | null>(null);
+  readonly estadoOriginal = signal<InformeFinanciero['estado'] | null>(null);
+  /** True al editar un informe ya resuelto: pide motivo y lo reenvía a aprobación. */
+  readonly esCorreccion = computed(() => this.estadoOriginal() !== null && this.estadoOriginal() !== 'PENDIENTE');
 
   readonly totalIngresos = computed(() => this.suma(INGRESOS.map((r) => r.codigo)));
   readonly diezmo = computed(() => Math.round(this.totalIngresos() * PORCENTAJE_DIEZMO) / 100);
@@ -689,15 +719,78 @@ export class InformesComponent implements OnInit {
 
   abrirCaptura(): void {
     this.errorForm.set([]);
+    this.editandoId.set(null);
+    this.estadoOriginal.set(null);
+    this.prepararCabecera(false, false);
     this.formCabecera.reset({
       iglesia_id: null,
       ministro_id: null,
       fecha_inicio: new Date(),
       fecha_fin: new Date(),
+      motivo: '',
     });
     this.montos.set({});
     this.boletas.set({});
     this.dialogoCaptura.set(true);
+  }
+
+  /**
+   * Abre el formulario con los montos y boletas de un informe para editarlo (si está
+   * pendiente) o corregirlo (si ya estaba aprobado o rechazado). Iglesia, ministro y
+   * periodo no cambian. El diezmo y el remanente se recalculan solos.
+   * @param informe informe de la lista.
+   */
+  abrirEdicion(informe: InformeFinanciero): void {
+    this.api.obtener(informe.id).subscribe((r) => {
+      const i = r.data;
+      const codigoPorId = new Map(Object.entries(this.conceptosPorCodigo()).map(([codigo, c]) => [c.id, codigo]));
+
+      this.errorForm.set([]);
+      this.editandoId.set(i.id);
+      this.estadoOriginal.set(i.estado);
+      this.prepararCabecera(true, i.estado !== 'PENDIENTE');
+      this.formCabecera.reset({
+        iglesia_id: i.iglesia_id,
+        ministro_id: i.ministro_id,
+        fecha_inicio: isoAFechaLocal(i.fecha_inicio),
+        fecha_fin: isoAFechaLocal(i.fecha_fin),
+        motivo: '',
+      });
+
+      const montos: Record<string, number | null> = {};
+      const boletas: Record<string, DatosBoleta> = {};
+      for (const l of i.lineas ?? []) {
+        const codigo = codigoPorId.get(l.concepto_movimiento_id);
+        if (!codigo || codigo === 'EGR-DIEZMO' || codigo === 'EGR-REMANENTE') continue;
+        montos[codigo] = Number(l.monto);
+        if (this.requiereBoleta(codigo)) {
+          boletas[codigo] = {
+            numero: l.boleta_numero ?? '',
+            fecha: l.fecha ? isoAFechaLocal(l.fecha) : null,
+            archivo: null,
+            archivoActual: l.tiene_archivo_boleta ? l.archivo_boleta_nombre : null,
+          };
+        }
+      }
+      this.montos.set(montos);
+      this.boletas.set(boletas);
+      this.dialogoCaptura.set(true);
+    });
+  }
+
+  /**
+   * Deja el formulario listo para un alta, una edición o una corrección.
+   * @param edicion      true si se edita un informe existente (iglesia, ministro y fechas quedan fijos).
+   * @param obligaMotivo true si es una corrección (el motivo es obligatorio).
+   */
+  private prepararCabecera(edicion: boolean, obligaMotivo: boolean): void {
+    const c = this.formCabecera.controls;
+    for (const control of [c.iglesia_id, c.ministro_id, c.fecha_inicio, c.fecha_fin]) {
+      if (edicion) control.disable({ emitEvent: false });
+      else control.enable({ emitEvent: false });
+    }
+    c.motivo.setValidators(obligaMotivo ? [Validators.required] : []);
+    c.motivo.updateValueAndValidity({ emitEvent: false });
   }
 
   /** Arma las líneas a enviar; el diezmo y el remanente los genera el backend. */
@@ -743,7 +836,12 @@ export class InformesComponent implements OnInit {
     const v = this.formCabecera.getRawValue();
     const lineas = this.armarLineas(fechaLocalAIso(v.fecha_fin));
 
-    this.api.crear(v.iglesia_id as number, v.ministro_id, fechaLocalAIso(v.fecha_inicio), fechaLocalAIso(v.fecha_fin), lineas).subscribe({
+    const id = this.editandoId();
+    const peticion = id
+      ? this.api.actualizar(id, lineas, this.esCorreccion() ? v.motivo.trim() : undefined)
+      : this.api.crear(v.iglesia_id as number, v.ministro_id, fechaLocalAIso(v.fecha_inicio), fechaLocalAIso(v.fecha_fin), lineas);
+
+    peticion.subscribe({
       next: (r) => this.subirArchivos(r.data),
       error: (e: HttpErrorResponse) => {
         this.guardando.set(false);
@@ -782,7 +880,12 @@ export class InformesComponent implements OnInit {
   private terminarGuardado(): void {
     this.guardando.set(false);
     this.dialogoCaptura.set(false);
-    this.mensajes.add({ severity: 'success', summary: 'Informe creado, queda pendiente de aprobación' });
+    this.mensajes.add({
+      severity: 'success',
+      summary: this.esCorreccion()
+        ? 'Corrección guardada: el informe quedó pendiente de aprobación'
+        : this.editandoId() ? 'Informe actualizado' : 'Informe creado, queda pendiente de aprobación',
+    });
     this.recargar();
   }
 

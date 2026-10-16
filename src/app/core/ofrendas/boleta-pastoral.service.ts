@@ -68,9 +68,16 @@ export class BoletaPastoralService {
     });
   }
 
-  /** Reemplaza la ofrenda asignada y las líneas de una boleta PENDIENTE. */
-  actualizar(id: number, ofrendaAsignada: number, lineas: LineaBoletaPastoralNueva[]): Observable<{ data: BoletaPastoral }> {
-    return this.http.put<{ data: BoletaPastoral }>(`${this.base}/${id}`, { ofrenda_asignada: ofrendaAsignada, lineas });
+  /**
+   * Reemplaza la ofrenda asignada y las líneas de una boleta. Si ya estaba aprobada o
+   * rechazada es una corrección: lleva el motivo y la boleta vuelve a pendiente.
+   * @param id              boleta.
+   * @param ofrendaAsignada ofrenda asignada del mes.
+   * @param lineas          renglones de necesidades.
+   * @param motivo          motivo de la corrección (solo cuando ya estaba resuelta).
+   */
+  actualizar(id: number, ofrendaAsignada: number, lineas: LineaBoletaPastoralNueva[], motivo?: string): Observable<{ data: BoletaPastoral }> {
+    return this.http.put<{ data: BoletaPastoral }>(`${this.base}/${id}`, { ofrenda_asignada: ofrendaAsignada, lineas, ...(motivo ? { motivo } : {}) });
   }
 
   /** Aprueba una boleta pendiente. */

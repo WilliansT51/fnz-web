@@ -54,9 +54,15 @@ export class InformeFinancieroService {
     });
   }
 
-  /** Reemplaza las líneas de un informe PENDIENTE. */
-  actualizar(id: number, lineas: LineaInformeNueva[]): Observable<{ data: InformeFinanciero }> {
-    return this.http.put<{ data: InformeFinanciero }>(`${this.base}/${id}`, { lineas });
+  /**
+   * Reemplaza las líneas de un informe. Si ya estaba aprobado o rechazado es una corrección:
+   * lleva el motivo y el informe vuelve a pendiente de aprobación.
+   * @param id     informe.
+   * @param lineas renglones nuevos.
+   * @param motivo motivo de la corrección (solo cuando ya estaba resuelto).
+   */
+  actualizar(id: number, lineas: LineaInformeNueva[], motivo?: string): Observable<{ data: InformeFinanciero }> {
+    return this.http.put<{ data: InformeFinanciero }>(`${this.base}/${id}`, { lineas, ...(motivo ? { motivo } : {}) });
   }
 
   /** Carga la boleta escaneada (pdf/jpg/png, máx. 5 MB) de una línea con boleta manual. */
