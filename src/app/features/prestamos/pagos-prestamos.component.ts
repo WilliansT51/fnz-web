@@ -1,0 +1,453 @@
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
+import { DatePipe, DecimalPipe } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
+import { Subject, Subscription, debounceTime } from 'rxjs';
+import { TableLazyLoadEvent, TableModule } from 'primeng/table';
+import { ButtonModule } from 'primeng/button';
+import { InputTextModule } from 'primeng/inputtext';
+import { InputNumberModule } from 'primeng/inputnumber';
+import { SelectModule } from 'primeng/select';
+import { DatePickerModule } from 'primeng/datepicker';
+import { TagModule } from 'primeng/tag';
+import { DialogModule } from 'primeng/dialog';
+import { MessageService } from 'primeng/api';
+
+import { TienePermisoDirective } from '../../core/auth/tiene-permiso.directive';
+import { fechaLocalAIso } from '../../core/ofrendas/fecha.util';
+import { PrestamoService } from '../../core/prestamos/prestamo.service';
+import { EstadoPrestamo, Prestamo } from '../../core/models/prestamos.models';
+
+const SEVERIDAD_ESTADO: Record<EstadoPrestamo, 'warn' | 'info' | 'success' | 'danger'> = {
+  PENDIENTE: 'warn',
+  ACTIVO: 'info',
+  PAGADO: 'success',
+  RECHAZADO: 'danger',
+};
+
+const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
+  PENDIENTE: 'warn',
+  PARCIAL: 'info',
+  PAGADA: 'success',
+};
+
+/**
+ * Pagos de préstamos: busca un préstamo por No. de préstamo, iglesia o
+ * ministro, registra abonos/pagos (que se aplican a las cuotas más
+ * antiguas) y permite anularlos con motivo. Los préstamos se capturan y
+ * aprueban en la pantalla "Préstamos".
+ */
+@Component({
+  selector: 'app-pagos-prestamos',
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    FormsModule,
+    ReactiveFormsModule,
+    TableModule,
+    ButtonModule,
+    InputTextModule,
+    InputNumberModule,
+    SelectModule,
+    DatePickerModule,
+    TagModule,
+    DialogModule,
+    TienePermisoDirective,
+  ],
+  template: `
+    <header class="fnz-toolbar-tabla">
+      <div>
+        <h1 class="fnz-titulo-pagina">Pagos de préstamos</h1>
+        <p class="fnz-subtitulo">Busque el préstamo y registre sus pagos o abonos.</p>
+      </div>
+    </header>
+
+    <div class="filtros">
+      <span class="busqueda">
+        <i class="pi pi-search"></i>
+        <input
+          pInputText
+          type="search"
+          placeholder="Buscar por No. de préstamo, iglesia o ministro"
+          [ngModel]="busqueda()"
+          (ngModelChange)="buscar($event)"
+        />
+      </span>
+      <p-select
+        [options]="opcionesEstado"
+        optionLabel="label"
+        optionValue="value"
+        placeholder="Todos los estados"
+        [showClear]="true"
+        [ngModel]="filtroEstado()"
+        (ngModelChange)="filtroEstado.set($event); recargar()"
+      />
+    </div>
+
+    <p-table
+      [value]="prestamos()"
+      [lazy]="true"
+      (onLazyLoad)="cargar($event)"
+      [paginator]="true"
+      [rows]="15"
+      [totalRecords]="total()"
+      [loading]="cargando()"
+      dataKey="id"
+      styleClass="fnz-tarjeta p-datatable-sm"
+      currentPageReportTemplate="{first}–{last} de {totalRecords}"
+      [showCurrentPageReport]="true"
+    >
+      <ng-template #header>
+        <tr>
+          <th>No. préstamo</th>
+          <th>Deudor</th>
+          <th>Monto</th>
+          <th>Pagado</th>
+          <th>Saldo</th>
+          <th>Estado</th>
+          <th style="width: 7rem"></th>
+        </tr>
+      </ng-template>
+      <ng-template #body let-p>
+        <tr>
+          <td>{{ p.codigo }}</td>
+          <td>{{ deudor(p) }}</td>
+          <td>Q {{ p.monto | number: '1.2-2' }}</td>
+          <td>Q {{ p.total_pagado | number: '1.2-2' }}</td>
+          <td>Q {{ p.saldo_pendiente | number: '1.2-2' }}</td>
+          <td><p-tag [value]="p.estado" [severity]="severidad(p.estado)" /></td>
+          <td class="acciones">
+            <p-button
+              [label]="p.estado === 'ACTIVO' ? 'Pagos' : 'Ver'"
+              [icon]="p.estado === 'ACTIVO' ? 'pi pi-dollar' : 'pi pi-eye'"
+              size="small"
+              [outlined]="true"
+              (onClick)="abrirPrestamo(p)"
+            />
+          </td>
+        </tr>
+      </ng-template>
+      <ng-template #emptymessage>
+        <tr>
+          <td colspan="7" class="vacio">Sin préstamos que coincidan con la búsqueda.</td>
+        </tr>
+      </ng-template>
+    </p-table>
+
+    <!-- Diálogo del préstamo: tabla de pagos, registro de pagos e historial -->
+    <p-dialog header="Pagos del préstamo" [(visible)]="dialogo" [modal]="true" [style]="{ width: '56rem', maxWidth: '96vw' }">
+      @if (activo(); as p) {
+        <div class="cabecera-detalle">
+          <div>
+            <strong>{{ p.codigo }}</strong> — {{ deudor(p) }}
+            <p-tag [value]="p.estado" [severity]="severidad(p.estado)" />
+          </div>
+          <p class="fnz-subtitulo">
+            Desembolso {{ p.fecha_desembolso | date: 'dd/MM/yyyy' : 'UTC' }} · {{ p.plazo_meses }} cuotas mensuales
+          </p>
+        </div>
+
+        <div class="resumen">
+          <div><span>Monto del préstamo</span><strong>Q {{ p.monto | number: '1.2-2' }}</strong></div>
+          <div><span>Total pagado</span><strong>Q {{ p.total_pagado | number: '1.2-2' }}</strong></div>
+          <div class="general"><span>Saldo pendiente</span><strong>Q {{ p.saldo_pendiente | number: '1.2-2' }}</strong></div>
+        </div>
+
+        @if (p.estado === 'ACTIVO') {
+          <ng-container *appTienePermiso="'pagos.pagar'">
+            <p class="fnz-titulo-seccion">Registrar pago</p>
+            <form class="grid-pago" [formGroup]="formPago" (ngSubmit)="guardarPago()">
+              <label>
+                <span>Fecha</span>
+                <p-datePicker formControlName="fecha_pago" dateFormat="dd/mm/yy" appendTo="body" fluid />
+              </label>
+              <label>
+                <span>Monto (Q)</span>
+                <p-inputNumber formControlName="monto" mode="currency" currency="GTQ" locale="es-GT" [minFractionDigits]="2" fluid />
+              </label>
+              <label>
+                <span>No. boleta / referencia</span>
+                <input pInputText formControlName="referencia" maxlength="60" />
+              </label>
+              <p-button label="Registrar" type="submit" [loading]="guardandoPago()" [disabled]="formPago.invalid || guardandoPago()" />
+            </form>
+            @if (errorPago().length) {
+              <ul class="errores">
+                @for (e of errorPago(); track e) { <li>{{ e }}</li> }
+              </ul>
+            }
+          </ng-container>
+        }
+
+        <p class="fnz-titulo-seccion">Tabla de pagos</p>
+        <table class="tabla-lineas">
+          <thead><tr><th>No.</th><th>Vencimiento</th><th>Cuota</th><th>Pagado</th><th>Estado</th></tr></thead>
+          <tbody>
+            @for (c of p.cuotas; track c.id) {
+              <tr>
+                <td>{{ c.numero }}</td>
+                <td>{{ c.fecha_vencimiento | date: 'dd/MM/yyyy' : 'UTC' }}</td>
+                <td>Q {{ c.monto | number: '1.2-2' }}</td>
+                <td>Q {{ c.monto_pagado | number: '1.2-2' }}</td>
+                <td><p-tag [value]="c.estado" [severity]="severidadCuota(c.estado)" /></td>
+              </tr>
+            }
+          </tbody>
+        </table>
+
+        <p class="fnz-titulo-seccion">Historial de pagos</p>
+        @if (p.pagos?.length) {
+          <table class="tabla-lineas">
+            <thead><tr><th>Fecha</th><th>Monto</th><th>Referencia</th><th>Se aplicó a</th><th>Estado</th><th></th></tr></thead>
+            <tbody>
+              @for (g of p.pagos; track g.id) {
+                <tr [class.anulado]="g.estado === 'ANULADO'">
+                  <td>{{ g.fecha_pago | date: 'dd/MM/yyyy' : 'UTC' }}</td>
+                  <td>Q {{ g.monto | number: '1.2-2' }}</td>
+                  <td>{{ g.referencia || '—' }}</td>
+                  <td>
+                    @for (a of g.aplicaciones; track a.id) {
+                      <div>Cuota {{ a.cuota?.numero }}: Q {{ a.monto | number: '1.2-2' }}</div>
+                    }
+                  </td>
+                  <td>
+                    {{ g.estado }}
+                    @if (g.motivo_anulacion) { <small>({{ g.motivo_anulacion }})</small> }
+                  </td>
+                  <td>
+                    @if (g.estado === 'APLICADO') {
+                      <p-button
+                        *appTienePermiso="'pagos.anular'"
+                        icon="pi pi-ban"
+                        severity="danger"
+                        [rounded]="true"
+                        [text]="true"
+                        size="small"
+                        (onClick)="abrirAnulacion(g.id)"
+                      />
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        } @else {
+          <p class="fnz-subtitulo">Aún no hay pagos registrados.</p>
+        }
+      }
+    </p-dialog>
+
+    <!-- Diálogo de anulación de pago -->
+    <p-dialog header="Anular pago" [(visible)]="dialogoAnulacion" [modal]="true" [style]="{ width: '28rem' }">
+      <label class="campo">
+        <span>Motivo (obligatorio)</span>
+        <input pInputText [(ngModel)]="motivoAnulacion" maxlength="255" fluid />
+      </label>
+      @if (errorPago().length) {
+        <ul class="errores">
+          @for (e of errorPago(); track e) { <li>{{ e }}</li> }
+        </ul>
+      }
+      <div class="pie">
+        <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="dialogoAnulacion.set(false)" />
+        <p-button label="Anular pago" severity="danger" [loading]="guardandoPago()" [disabled]="!motivoAnulacion.trim()" (onClick)="anularPago()" />
+      </div>
+    </p-dialog>
+  `,
+  styles: [
+    `
+      .filtros { display: flex; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+      .busqueda { position: relative; flex: 1; min-width: 16rem; max-width: 30rem; display: flex; align-items: center; }
+      .busqueda i { position: absolute; left: 0.75rem; color: var(--fnz-tinta-suave); }
+      .busqueda input { width: 100%; padding-left: 2.25rem; }
+      .acciones { white-space: nowrap; text-align: right; }
+      .vacio { text-align: center; padding: 2rem; color: var(--fnz-tinta-suave); }
+      .grid-pago { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 0.75rem; align-items: end; }
+      label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 500; }
+      .resumen { display: grid; gap: 0.4rem; background: var(--fnz-fondo); border-radius: 8px; padding: 0.9rem; font-size: 0.85rem; margin: 0.75rem 0; }
+      .resumen div { display: flex; justify-content: space-between; }
+      .resumen .general { border-top: 1px solid var(--fnz-borde); padding-top: 0.5rem; font-size: 0.95rem; }
+      .errores { margin: 0.5rem 0 0; padding-left: 1.1rem; color: #c0392b; font-size: 0.82rem; }
+      .pie { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
+      .campo { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 500; margin: 0.9rem 0; }
+      .tabla-lineas { width: 100%; border-collapse: collapse; margin: 0.5rem 0; font-size: 0.85rem; }
+      .tabla-lineas th, .tabla-lineas td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--fnz-borde); vertical-align: top; }
+      .tabla-lineas .anulado { color: var(--fnz-tinta-suave); text-decoration: line-through; }
+      .cabecera-detalle p { margin: 0.25rem 0; }
+    `,
+  ],
+})
+export class PagosPrestamosComponent implements OnInit, OnDestroy {
+  private readonly api = inject(PrestamoService);
+  private readonly fb = inject(FormBuilder);
+  private readonly mensajes = inject(MessageService);
+
+  readonly opcionesEstado = [
+    { label: 'Activo', value: 'ACTIVO' },
+    { label: 'Pagado', value: 'PAGADO' },
+    { label: 'Pendiente de aprobación', value: 'PENDIENTE' },
+    { label: 'Rechazado', value: 'RECHAZADO' },
+  ];
+
+  readonly prestamos = signal<Prestamo[]>([]);
+  readonly total = signal(0);
+  readonly cargando = signal(false);
+  readonly busqueda = signal('');
+  readonly filtroEstado = signal<string | null>('ACTIVO');
+
+  readonly dialogo = signal(false);
+  readonly activo = signal<Prestamo | null>(null);
+  readonly guardandoPago = signal(false);
+  readonly errorPago = signal<string[]>([]);
+
+  readonly dialogoAnulacion = signal(false);
+  motivoAnulacion = '';
+  private pagoAAnular: number | null = null;
+
+  private ultimoEvento: TableLazyLoadEvent = { first: 0, rows: 15 };
+  private readonly escritura$ = new Subject<void>();
+  private suscripcion?: Subscription;
+
+  readonly formPago = this.fb.nonNullable.group({
+    fecha_pago: [new Date(), Validators.required],
+    monto: [0, [Validators.required, Validators.min(0.01)]],
+    referencia: [''],
+  });
+
+  ngOnInit(): void {
+    // Espera 300 ms tras la última tecla antes de consultar, para no saturar la API.
+    this.suscripcion = this.escritura$.pipe(debounceTime(300)).subscribe(() => this.recargar());
+  }
+
+  ngOnDestroy(): void {
+    this.suscripcion?.unsubscribe();
+  }
+
+  /** Actualiza el texto de búsqueda y dispara la consulta con retardo. @param texto lo escrito por el usuario. */
+  buscar(texto: string): void {
+    this.busqueda.set(texto);
+    this.escritura$.next();
+  }
+
+  /** Nombre del deudor (iglesia o ministro) de un préstamo. @param p préstamo. */
+  deudor(p: Prestamo): string {
+    if (p.iglesia) return `${p.iglesia.nombre} (iglesia)`;
+    if (p.ministro) return `${p.ministro.nombre} ${p.ministro.apellido} (ministro)`;
+    return '—';
+  }
+
+  severidad(estado: EstadoPrestamo) {
+    return SEVERIDAD_ESTADO[estado];
+  }
+
+  severidadCuota(estado: string) {
+    return SEVERIDAD_CUOTA[estado];
+  }
+
+  /** Carga la página de préstamos aplicando la búsqueda y el estado. @param evento paginación de la tabla. */
+  cargar(evento: TableLazyLoadEvent): void {
+    this.ultimoEvento = evento;
+    this.cargando.set(true);
+    this.api
+      .listar({
+        q: this.busqueda().trim() || undefined,
+        estado: this.filtroEstado() ?? undefined,
+        page: Math.floor((evento.first ?? 0) / (evento.rows ?? 15)) + 1,
+        por_pagina: evento.rows ?? 15,
+      })
+      .subscribe({
+        next: (r) => {
+          this.prestamos.set(r.data);
+          this.total.set(r.meta.total);
+          this.cargando.set(false);
+        },
+        error: () => this.cargando.set(false),
+      });
+  }
+
+  recargar(): void {
+    this.cargar({ ...this.ultimoEvento, first: 0 });
+  }
+
+  /** Abre el préstamo con su tabla de pagos e historial. @param p préstamo de la lista. */
+  abrirPrestamo(p: Prestamo): void {
+    this.errorPago.set([]);
+    this.formPago.reset({ fecha_pago: new Date(), monto: 0, referencia: '' });
+    this.api.obtener(p.id).subscribe((r) => {
+      this.activo.set(r.data);
+      this.dialogo.set(true);
+    });
+  }
+
+  /** Registra el pago del formulario y refresca el préstamo y la lista. */
+  guardarPago(): void {
+    const p = this.activo();
+    if (!p || this.formPago.invalid) return;
+    this.guardandoPago.set(true);
+    this.errorPago.set([]);
+
+    const v = this.formPago.getRawValue();
+    this.api
+      .registrarPago(p.id, { fecha_pago: fechaLocalAIso(v.fecha_pago), monto: v.monto, referencia: v.referencia || undefined })
+      .subscribe({
+        next: () => {
+          this.guardandoPago.set(false);
+          this.formPago.reset({ fecha_pago: new Date(), monto: 0, referencia: '' });
+          this.mensajes.add({ severity: 'success', summary: 'Pago registrado' });
+          this.refrescarActivo();
+        },
+        error: (e: HttpErrorResponse) => {
+          this.guardandoPago.set(false);
+          this.errorPago.set(this.mensajesDeError(e, 'No se pudo registrar el pago.'));
+        },
+      });
+  }
+
+  /** Abre el diálogo para pedir el motivo de anulación. @param pagoId pago a anular. */
+  abrirAnulacion(pagoId: number): void {
+    this.pagoAAnular = pagoId;
+    this.motivoAnulacion = '';
+    this.errorPago.set([]);
+    this.dialogoAnulacion.set(true);
+  }
+
+  /** Anula el pago elegido con el motivo digitado y refresca el préstamo. */
+  anularPago(): void {
+    const p = this.activo();
+    if (!p || this.pagoAAnular === null || !this.motivoAnulacion.trim()) return;
+    this.guardandoPago.set(true);
+
+    this.api.anularPago(p.id, this.pagoAAnular, this.motivoAnulacion.trim()).subscribe({
+      next: () => {
+        this.guardandoPago.set(false);
+        this.dialogoAnulacion.set(false);
+        this.mensajes.add({ severity: 'success', summary: 'Pago anulado' });
+        this.refrescarActivo();
+      },
+      error: (e: HttpErrorResponse) => {
+        this.guardandoPago.set(false);
+        this.errorPago.set(this.mensajesDeError(e, 'No se pudo anular el pago.'));
+      },
+    });
+  }
+
+  /** Vuelve a consultar el préstamo abierto y recarga la lista. */
+  private refrescarActivo(): void {
+    const p = this.activo();
+    if (!p) return;
+    this.api.obtener(p.id).subscribe((r) => this.activo.set(r.data));
+    this.recargar();
+  }
+
+  /**
+   * Extrae los mensajes de error de una respuesta 422 (o uno genérico).
+   * @param e error HTTP. @param porDefecto texto si no hay detalle.
+   */
+  private mensajesDeError(e: HttpErrorResponse, porDefecto: string): string[] {
+    if (e.status === 422) {
+      const lista = Object.values(e.error?.errores ?? e.error?.errors ?? {}).flat() as string[];
+      if (lista.length) return lista;
+    }
+    return [e.error?.mensaje ?? porDefecto];
+  }
+}
