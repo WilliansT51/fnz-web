@@ -181,10 +181,34 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
                 <input pInputText formControlName="referencia" maxlength="60" />
               </label>
               <p-button label="Registrar" type="submit" [loading]="guardandoPago()" [disabled]="formPago.invalid || guardandoPago()" />
-              <label class="archivo">
-                <span>Boleta del depósito (opcional · PDF, imagen, Word o Excel, máx. 10 MB)</span>
-                <input #archivoInput type="file" [accept]="extensionesPermitidas" (change)="elegirArchivo(archivoInput)" />
-              </label>
+              <div class="archivo">
+                <span class="etiqueta-archivo">Boleta del depósito (opcional · PDF, imagen, Word o Excel, máx. 10 MB)</span>
+                <div class="selector-archivo">
+                  <input #archivoInput type="file" hidden [accept]="extensionesPermitidas" (change)="elegirArchivo(archivoInput)" />
+                  <p-button
+                    type="button"
+                    label="Seleccionar archivo"
+                    icon="pi pi-upload"
+                    severity="secondary"
+                    [outlined]="true"
+                    (onClick)="archivoInput.click()"
+                  />
+                  @if (nombreArchivo()) {
+                    <span class="nombre-archivo"><i class="pi pi-paperclip"></i> {{ nombreArchivo() }}</span>
+                    <p-button
+                      type="button"
+                      icon="pi pi-times"
+                      severity="secondary"
+                      [text]="true"
+                      [rounded]="true"
+                      size="small"
+                      (onClick)="quitarArchivo(archivoInput)"
+                    />
+                  } @else {
+                    <span class="nombre-archivo vacio-archivo">Ningún archivo seleccionado</span>
+                  }
+                </div>
+              </div>
             </form>
             @if (errorPago().length) {
               <ul class="errores">
@@ -299,7 +323,11 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
       .acciones { white-space: nowrap; text-align: right; }
       .vacio { text-align: center; padding: 2rem; color: var(--fnz-tinta-suave); }
       .grid-pago { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 0.75rem; align-items: end; }
-      .grid-pago .archivo { grid-column: 1 / -1; }
+      .grid-pago .archivo { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 0.4rem; }
+      .etiqueta-archivo { font-size: 0.82rem; font-weight: 500; }
+      .selector-archivo { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+      .nombre-archivo { font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; white-space: nowrap; }
+      .vacio-archivo { color: var(--fnz-tinta-suave); }
       .enlace-doc, .adjuntar { cursor: pointer; color: var(--p-primary-color, #1d4ed8); font-size: 0.8rem; display: block; }
       .adjuntar { display: inline-flex; flex-direction: row; gap: 0.3rem; align-items: center; font-weight: 400; }
       label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 500; }
@@ -351,6 +379,8 @@ export class PagosPrestamosComponent implements OnInit, OnDestroy {
   /** Extensiones aceptadas por el selector de archivos (igual que el backend). */
   readonly extensionesPermitidas = '.pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx';
   private archivoDeposito: File | null = null;
+  /** Nombre del archivo elegido, para mostrarlo junto al botón. */
+  readonly nombreArchivo = signal('');
 
   readonly formPago = this.fb.nonNullable.group({
     fecha_pago: [new Date(), Validators.required],
@@ -418,6 +448,7 @@ export class PagosPrestamosComponent implements OnInit, OnDestroy {
     this.errorPago.set([]);
     this.formPago.reset({ fecha_pago: new Date(), monto: 0, referencia: '' });
     this.archivoDeposito = null;
+    this.nombreArchivo.set('');
     this.api.obtener(p.id).subscribe((r) => {
       this.activo.set(r.data);
       this.dialogoPago.set(true);
@@ -443,10 +474,22 @@ export class PagosPrestamosComponent implements OnInit, OnDestroy {
       this.errorPago.set(['El archivo supera el límite de 10 MB.']);
       input.value = '';
       this.archivoDeposito = null;
+      this.nombreArchivo.set('');
       return;
     }
     this.errorPago.set([]);
     this.archivoDeposito = archivo;
+    this.nombreArchivo.set(archivo?.name ?? '');
+  }
+
+  /**
+   * Quita el archivo elegido para el depósito.
+   * @param input control de archivo del formulario de pago.
+   */
+  quitarArchivo(input: HTMLInputElement): void {
+    input.value = '';
+    this.archivoDeposito = null;
+    this.nombreArchivo.set('');
   }
 
   /**
@@ -497,6 +540,7 @@ export class PagosPrestamosComponent implements OnInit, OnDestroy {
           this.guardandoPago.set(false);
           this.formPago.reset({ fecha_pago: new Date(), monto: 0, referencia: '' });
           this.archivoDeposito = null;
+          this.nombreArchivo.set('');
           this.dialogoPago.set(false);
           this.mensajes.add({ severity: 'success', summary: 'Pago registrado' });
           this.refrescarActivo();
