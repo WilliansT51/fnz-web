@@ -375,10 +375,10 @@ const COLECTAS: Renglon[] = [
                   />
                   <label class="subir">
                     <i class="pi pi-upload"></i>
-                    <span>{{ datosBoleta(r.codigo).archivo?.name ?? 'Cargar boleta (PDF/imagen)' }}</span>
+                    <span>{{ datosBoleta(r.codigo).archivo?.name ?? 'Cargar boleta (máx. 10 MB)' }}</span>
                     <input
                       type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
                       (change)="elegirArchivo(r.codigo, $event)"
                       hidden
                     />
@@ -622,8 +622,20 @@ export class InformesComponent implements OnInit {
     this.boletas.update((b) => ({ ...b, [codigo]: { ...this.datosBoleta(codigo), [campo]: valor } }));
   }
 
+  /**
+   * Toma la boleta escaneada elegida para un renglón de colecta; rechaza
+   * archivos de más de 10 MB (mismo límite que el backend).
+   * @param codigo código del concepto de colecta. @param evento evento `change` del selector de archivos.
+   */
   elegirArchivo(codigo: string, evento: Event): void {
-    const archivo = (evento.target as HTMLInputElement).files?.[0] ?? null;
+    const input = evento.target as HTMLInputElement;
+    const archivo = input.files?.[0] ?? null;
+    if (archivo && archivo.size > 10 * 1024 * 1024) {
+      this.mensajes.add({ severity: 'error', summary: 'El archivo supera el límite de 10 MB' });
+      input.value = '';
+      this.setBoleta(codigo, 'archivo', null);
+      return;
+    }
     this.setBoleta(codigo, 'archivo', archivo);
   }
 
