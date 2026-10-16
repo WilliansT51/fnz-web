@@ -162,6 +162,13 @@ export const routes: Routes = [
         title: 'Préstamos · FNZ',
       },
       {
+        path: 'gastos',
+        canActivate: [permisoGuard],
+        data: { permisos: ['gastos.consultar'] },
+        loadComponent: () => import('./features/gastos/gastos.component').then((m) => m.GastosComponent),
+        title: 'Control de gastos · FNZ',
+      },
+      {
         path: 'prestamos/pagos',
         canActivate: [permisoGuard],
         data: { permisos: ['pagos.consultar'] },

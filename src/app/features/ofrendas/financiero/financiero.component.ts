@@ -21,7 +21,7 @@ const COLUMNA_ESTADO: ColumnaTabla = { campo: 'estado', etiqueta: 'Estado', tipo
   imports: [CatalogoTablaComponent],
   template: `
     <h1 class="fnz-titulo-pagina">Catálogos financieros</h1>
-    <p class="fnz-subtitulo">Tipo de Ofrendas.</p>
+    <p class="fnz-subtitulo">Tipo de Ofrendas y tipos de gasto.</p>
 
     <div class="fnz-contenido">
       <app-catalogo-tabla
@@ -31,6 +31,15 @@ const COLUMNA_ESTADO: ColumnaTabla = { campo: 'estado', etiqueta: 'Estado', tipo
         [campos]="camposConceptoMovimiento"
         [columnas]="columnasConceptoMovimiento"
       />
+
+      <div class="separador"></div>
+      <app-catalogo-tabla
+        endpoint="catalogos/financiero/gasto-tipos"
+        titulo="Tipos de gasto (Control de gastos)"
+        permisoPrefijo="financiero"
+        [campos]="camposGastoTipo"
+        [columnas]="columnasGastoTipo"
+      />
     </div>
   `,
   styles: [
@@ -38,10 +47,20 @@ const COLUMNA_ESTADO: ColumnaTabla = { campo: 'estado', etiqueta: 'Estado', tipo
       .fnz-contenido {
         margin-top: 1rem;
       }
+      .separador {
+        height: 2rem;
+      }
     `,
   ],
 })
 export class FinancieroComponent {
+  /** Tipos de gasto del módulo Control de gastos (Especial, Medicina, Otros…); si ya tienen gastos, eliminar los desactiva. */
+  readonly camposGastoTipo: CampoFormulario[] = [
+    { nombre: 'nombre', etiqueta: 'Nombre', tipo: 'texto', requerido: true },
+    CAMPO_ESTADO,
+  ];
+  readonly columnasGastoTipo: ColumnaTabla[] = [{ campo: 'nombre', etiqueta: 'Nombre' }, COLUMNA_ESTADO];
+
   readonly camposConceptoMovimiento: CampoFormulario[] = [
     { nombre: 'codigo', etiqueta: 'Código', tipo: 'texto', requerido: true },
     { nombre: 'nombre', etiqueta: 'Nombre', tipo: 'texto', requerido: true },
