@@ -177,16 +177,6 @@ export const routes: Routes = [
         title: 'Pagos de préstamos · FNZ',
       },
       {
-        path: 'ofrendas/solicitudes',
-        canActivate: [permisoGuard],
-        data: { permisos: ['solicitudes.consultar'] },
-        loadComponent: () =>
-          import('./features/ofrendas/solicitudes/solicitudes.component').then(
-            (m) => m.SolicitudesComponent,
-          ),
-        title: 'Solicitudes de cambio · FNZ',
-      },
-      {
         path: 'sin-permiso',
         loadComponent: () =>
           import('./features/layout/sin-permiso.component').then(
