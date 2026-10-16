@@ -1,6 +1,6 @@
 import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Subject, Subscription, debounceTime } from 'rxjs';
 import { TableLazyLoadEvent, TableModule } from 'primeng/table';
@@ -45,6 +45,7 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
   imports: [
     DatePipe,
     DecimalPipe,
+    NgTemplateOutlet,
     FormsModule,
     ReactiveFormsModule,
     TableModule,
@@ -120,13 +121,16 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
           <td>Q {{ p.saldo_pendiente | number: '1.2-2' }}</td>
           <td><p-tag [value]="p.estado" [severity]="severidad(p.estado)" /></td>
           <td class="acciones">
-            <p-button
-              [label]="p.estado === 'ACTIVO' ? 'Pagos' : 'Ver'"
-              [icon]="p.estado === 'ACTIVO' ? 'pi pi-dollar' : 'pi pi-eye'"
-              size="small"
-              [outlined]="true"
-              (onClick)="abrirPrestamo(p)"
-            />
+            @if (p.estado === 'ACTIVO') {
+              <p-button
+                *appTienePermiso="'pagos.pagar'"
+                label="Pagar"
+                icon="pi pi-dollar"
+                size="small"
+                (onClick)="abrirPago(p)"
+              />
+            }
+            <p-button label="Historial" icon="pi pi-history" size="small" [outlined]="true" (onClick)="abrirHistorial(p)" />
           </td>
         </tr>
       </ng-template>
@@ -137,28 +141,32 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
       </ng-template>
     </p-table>
 
-    <!-- Diálogo del préstamo: tabla de pagos, registro de pagos e historial -->
-    <p-dialog header="Pagos del préstamo" [(visible)]="dialogo" [modal]="true" [style]="{ width: '56rem', maxWidth: '96vw' }">
-      @if (activo(); as p) {
-        <div class="cabecera-detalle">
-          <div>
-            <strong>{{ p.codigo }}</strong> — {{ deudor(p) }}
-            <p-tag [value]="p.estado" [severity]="severidad(p.estado)" />
-          </div>
-          <p class="fnz-subtitulo">
-            Desembolso {{ p.fecha_desembolso | date: 'dd/MM/yyyy' : 'UTC' }} · {{ p.plazo_meses }} cuotas mensuales
-          </p>
+    <!-- Encabezado y resumen del préstamo, compartido por los diálogos de pago e historial -->
+    <ng-template #resumenPrestamo let-p>
+      <div class="cabecera-detalle">
+        <div>
+          <strong>{{ p.codigo }}</strong> — {{ deudor(p) }}
+          <p-tag [value]="p.estado" [severity]="severidad(p.estado)" />
         </div>
+        <p class="fnz-subtitulo">
+          Desembolso {{ p.fecha_desembolso | date: 'dd/MM/yyyy' : 'UTC' }} · {{ p.plazo_meses }} cuotas mensuales
+        </p>
+      </div>
 
-        <div class="resumen">
-          <div><span>Monto del préstamo</span><strong>Q {{ p.monto | number: '1.2-2' }}</strong></div>
-          <div><span>Total pagado</span><strong>Q {{ p.total_pagado | number: '1.2-2' }}</strong></div>
-          <div class="general"><span>Saldo pendiente</span><strong>Q {{ p.saldo_pendiente | number: '1.2-2' }}</strong></div>
-        </div>
+      <div class="resumen">
+        <div><span>Monto del préstamo</span><strong>Q {{ p.monto | number: '1.2-2' }}</strong></div>
+        <div><span>Total pagado</span><strong>Q {{ p.total_pagado | number: '1.2-2' }}</strong></div>
+        <div class="general"><span>Saldo pendiente</span><strong>Q {{ p.saldo_pendiente | number: '1.2-2' }}</strong></div>
+      </div>
+    </ng-template>
+
+    <!-- Diálogo "Registrar pago": solo el formulario del pago (con la boleta del depósito) -->
+    <p-dialog header="Registrar pago" [(visible)]="dialogoPago" [modal]="true" [style]="{ width: '46rem', maxWidth: '96vw' }">
+      @if (activo(); as p) {
+        <ng-container *ngTemplateOutlet="resumenPrestamo; context: { $implicit: p }" />
 
         @if (p.estado === 'ACTIVO') {
           <ng-container *appTienePermiso="'pagos.pagar'">
-            <p class="fnz-titulo-seccion">Registrar pago</p>
             <form class="grid-pago" [formGroup]="formPago" (ngSubmit)="guardarPago()">
               <label>
                 <span>Fecha</span>
@@ -185,6 +193,13 @@ const SEVERIDAD_CUOTA: Record<string, 'warn' | 'info' | 'success'> = {
             }
           </ng-container>
         }
+      }
+    </p-dialog>
+
+    <!-- Diálogo "Historial": tabla de pagos (cuotas) e historial de pagos del préstamo -->
+    <p-dialog header="Historial del préstamo" [(visible)]="dialogoHistorial" [modal]="true" [style]="{ width: '56rem', maxWidth: '96vw' }">
+      @if (activo(); as p) {
+        <ng-container *ngTemplateOutlet="resumenPrestamo; context: { $implicit: p }" />
 
         <p class="fnz-titulo-seccion">Tabla de pagos</p>
         <table class="tabla-lineas">
@@ -319,7 +334,8 @@ export class PagosPrestamosComponent implements OnInit, OnDestroy {
   readonly busqueda = signal('');
   readonly filtroEstado = signal<string | null>('ACTIVO');
 
-  readonly dialogo = signal(false);
+  readonly dialogoPago = signal(false);
+  readonly dialogoHistorial = signal(false);
   readonly activo = signal<Prestamo | null>(null);
   readonly guardandoPago = signal(false);
   readonly errorPago = signal<string[]>([]);
@@ -397,14 +413,23 @@ export class PagosPrestamosComponent implements OnInit, OnDestroy {
     this.cargar({ ...this.ultimoEvento, first: 0 });
   }
 
-  /** Abre el préstamo con su tabla de pagos e historial. @param p préstamo de la lista. */
-  abrirPrestamo(p: Prestamo): void {
+  /** Abre el diálogo para registrar un pago de un préstamo activo. @param p préstamo de la lista. */
+  abrirPago(p: Prestamo): void {
     this.errorPago.set([]);
     this.formPago.reset({ fecha_pago: new Date(), monto: 0, referencia: '' });
     this.archivoDeposito = null;
     this.api.obtener(p.id).subscribe((r) => {
       this.activo.set(r.data);
-      this.dialogo.set(true);
+      this.dialogoPago.set(true);
+    });
+  }
+
+  /** Abre el historial del préstamo: tabla de pagos (cuotas) y pagos registrados. @param p préstamo de la lista. */
+  abrirHistorial(p: Prestamo): void {
+    this.errorPago.set([]);
+    this.api.obtener(p.id).subscribe((r) => {
+      this.activo.set(r.data);
+      this.dialogoHistorial.set(true);
     });
   }
 
@@ -472,6 +497,7 @@ export class PagosPrestamosComponent implements OnInit, OnDestroy {
           this.guardandoPago.set(false);
           this.formPago.reset({ fecha_pago: new Date(), monto: 0, referencia: '' });
           this.archivoDeposito = null;
+          this.dialogoPago.set(false);
           this.mensajes.add({ severity: 'success', summary: 'Pago registrado' });
           this.refrescarActivo();
         },
